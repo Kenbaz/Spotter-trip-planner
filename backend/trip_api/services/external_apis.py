@@ -1,7 +1,6 @@
 # trip_api/services/external_apis.py
 
 import requests
-import json
 from typing import Dict, List, Tuple
 from django.conf import settings
 from django.core.cache import cache, caches
@@ -30,37 +29,31 @@ class ExternalAPIService:
     def _get_cache(self, cache_name='default'):
         """Get cache instance with fallback"""
         try:
-            if hasattr(caches, cache_name):
+            if hasattr(caches, cache_name) and cache_name in caches:
                 return caches[cache_name]
             else:
                 return cache
-        except:
+        except Exception:
             return cache
     
     def get_route_data(self, origin: Tuple[float, float], destination: Tuple[float, float]) -> Dict[str, any]:
         """
         Get route data from OpenRouteService API.
-        
-        Args:
-            origin: Tuple of (latitude, longitude) for starting point
-            destination: Tuple of (latitude, longitude) for destination
-            
-        Returns:
-            Dict with route data or error information
         """
         try:
-            cache_key = f"route_{origin[0]}_{destination[0]}_{destination[1]}"
+            cache_key = f"route_{origin[0]:.4f}_{origin[1]:.4f}_{destination[0]:.4f}_{destination[1]:.4f}"
+
             try:
                 api_cache = self._get_cache('api_responses')
                 cached_result = api_cache.get(cache_key)
-            except:
+            except Exception:
                 cached_result = cache.get(cache_key)
                 
             if cached_result:
                 logger.info(f"Using cached route data for {cache_key}")
                 return cached_result
             
-            # request parameters
+            # Request parameters
             coordinates = [
                 [origin[1], origin[0]],  # OpenRouteService expects [lng, lat]
                 [destination[1], destination[0]]
@@ -76,10 +69,10 @@ class ExternalAPIService:
                 'coordinates': coordinates,
                 'profile': 'driving-hgv',
                 'format': 'json',
-                'geometry_format': 'geojson',
+                'geometry': True,
                 'instructions': True,
                 'elevation': False,
-                'extra_info': ['surface', 'tollways', 'restrictions'],
+                'extra_info': ['surface', 'tollways'],
                 'options': {
                     'avoid_features': ['ferries'],
                     'vehicle_type': 'hgv'
@@ -100,7 +93,7 @@ class ExternalAPIService:
                 try:
                     api_cache = self._get_cache('api_responses')
                     api_cache.set(cache_key, processed_data, timeout=7200)
-                except:
+                except Exception:
                     cache.set(cache_key, processed_data, timeout=7200)
 
                 return processed_data
@@ -145,12 +138,9 @@ class ExternalAPIService:
             route_data: Raw response from OpenRouteService
             origin: Origin coordinates
             destination: Destination coordinates
-            
-        Returns:
-            Processed and normalized route data
         """
         try:
-            # Extracting route information
+            # Extract route information
             routes = route_data.get('routes', [])
             if not routes:
                 return {
@@ -162,35 +152,38 @@ class ExternalAPIService:
             best_route = routes[0]
             summary = best_route.get('summary', {})
 
-            # extract basic route metrics
+            # Extract basic route metrics
             distance_meters = summary.get('distance', 0)
             duration_seconds = summary.get('duration', 0)
 
-            # convert to standard units
+            # Convert to standard units
             distance_miles = distance_meters * self.meters_to_miles
             duration_hours = duration_seconds * self.seconds_to_hours
 
-            # extract geometry and instructions
+            # Extract geometry and instructions
             geometry = best_route.get('geometry', {})
             segments = best_route.get('segments', [])
 
-            # process turn by turn instructions
+            # Process turn by turn instructions
             instructions = []
             for segment in segments:
-                for step in segment.get('steps', []):
-                    instruction = {
-                        'instruction': step.get('instruction', ''),
-                        'distance_meters': step.get('distance', 0),
-                        'duration_seconds': step.get('duration', 0),
-                        'type': step.get('type', 0),
-                        'name': step.get('name', ''),
-                        'way_points': step.get('way_points', [])
-                    }
-                    instructions.append(instruction)
+                steps = segment.get('steps', [])
             
-            extract_info = best_route.get('extras', {})
-            surface_info = extract_info.get('surface', {})
-            tollway_info = extract_info.get('tollways', {})
+            for step in steps:
+                instruction = {
+                    'instruction': step.get('instruction', ''),
+                    'distance_meters': step.get('distance', 0),
+                    'duration_seconds': step.get('duration', 0),
+                    'type': step.get('type', 0),
+                    'name': step.get('name', ''),
+                    'way_points': step.get('way_points', [])
+                }
+                instructions.append(instruction)
+            
+            # Extract extra info
+            extra_info = best_route.get('extras', {})
+            surface_info = extra_info.get('surface', {})
+            tollway_info = extra_info.get('tollways', {})
 
             return {
                 'success': True,
@@ -220,16 +213,65 @@ class ExternalAPIService:
                 'details': str(e)
             }
     
+    def geocode_address(self, address: str) -> Dict[str, any]:
+        """
+        Geocode an address to get coordinates.
+        """
+        try:
+            cache_key = f"geocode_{address.lower().replace(' ', '_')}"
+            try:
+                api_cache = self._get_cache('api_responses')
+                cached_result = api_cache.get(cache_key)
+            except Exception:
+                cached_result = cache.get(cache_key)
+                
+            if cached_result:
+                return cached_result
+
+            print(f"Geocoding address: {address}")
+            params = {
+                'api_key': self.openrouteservice_api_key,
+                'text': address,
+                'size': 1,  # Only return the best match
+            }
+
+            response = requests.get(
+                f"{self.geocoding_base_url}/search",
+                params=params,
+                timeout=self.request_timeout
+            ) 
+
+            if response.status_code == 200:
+                geocode_data = response.json()
+                processed_data = self._process_geocode_response(geocode_data, address)
+
+                if processed_data['success']:
+                    try:
+                        api_cache = self._get_cache('api_responses')
+                        api_cache.set(cache_key, processed_data, timeout=86400)
+                    except Exception:
+                        cache.set(cache_key, processed_data, timeout=86400)
+
+                return processed_data
+            
+            else:
+                return {
+                    'success': False,
+                    'error': f"Geocoding failed with status {response.status_code}",
+                    'details': response.text
+                }
+        
+        except Exception as e:
+            logger.error(f"Geocoding error for address '{address}': {str(e)}")
+            return {
+                'success': False,
+                'error': 'Geocoding failed',
+                'details': str(e)
+            }
+    
     def _process_geocode_response(self, geocode_data: Dict, original_address: str) -> Dict[str, any]:
         """
         Process geocoding response from OpenRouteService.
-        
-        Args:
-            geocode_data: Raw geocoding response
-            original_address: Original address that was geocoded
-            
-        Returns:
-            Processed geocoding data
         """
         try:
             features = geocode_data.get('features', [])
@@ -279,73 +321,6 @@ class ExternalAPIService:
                 'details': str(e)
             }
 
-    def geocode_address(self, address: str) -> Dict[str, any]:
-        """
-        Geocode an address to get coordinates.
-        
-        Args:
-            address: Address string to geocode
-            
-        Returns:
-            Dict with geocoding results
-        """
-        try:
-            cache_key = f"geocode_{address.lower().replace(' ', '_')}"
-            try:
-                api_cache = self._get_cache('api_responses')
-                cached_result = api_cache.get(cache_key)
-            except:
-                cached_result = cache.get(cache_key)
-                
-            if cached_result:
-                return cached_result
-            
-            headers = {
-                'Authorization': self.openrouteservice_api_key,
-            }
-
-            params = {
-                'api_key': self.openrouteservice_api_key,
-                'text': address,
-                'size': 1,  # Only return the best match
-                'layers': ['address', 'venue', 'street']
-            }
-
-            response = requests.get(
-                f"{self.geocoding_base_url}/search",
-                headers=headers,
-                params=params,
-                timeout=self.request_timeout
-            )
-
-            if response.status_code == 200:
-                geocode_data = response.json()
-                processed_data = self._process_geocode_response(geocode_data, address)
-
-                if processed_data['success']:
-                    try:
-                        api_cache = self._get_cache('api_responses')
-                        api_cache.set(cache_key, processed_data, timeout=86400)
-                    except:
-                        cache.set(cache_key, processed_data, timeout=86400)
-
-                return processed_data
-            
-            else:
-                return {
-                    'success': False,
-                    'error': f"Geocoding failed with status {response.status_code}",
-                    'details': response.text
-                }
-        
-        except Exception as e:
-            logger.error(f"Geocoding error for address '{address}': {str(e)}")
-            return {
-                'success': False,
-                'error': 'Geocoding failed',
-                'details': str(e)
-            }
-    
     def reverse_geocode(self, latitude: float, longitude: float) -> Dict[str, any]:
         """
         Reverse geocode coordinates to get address.
@@ -358,14 +333,10 @@ class ExternalAPIService:
             Dict with reverse geocoding results
         """
         try:
-            cache_key = f"reverse_geocode_{latitude}_{longitude}"
+            cache_key = f"reverse_geocode_{latitude:.4f}_{longitude:.4f}"
             cached_result = cache.get(cache_key)
             if cached_result:
                 return cached_result
-
-            headers = {
-                'Authorization': self.openrouteservice_api_key,
-            }
 
             params = {
                 'api_key': self.openrouteservice_api_key,
@@ -376,12 +347,11 @@ class ExternalAPIService:
 
             response = requests.get(
                 f"{self.geocoding_base_url}/reverse",
-                headers=headers,
                 params=params,
                 timeout=self.request_timeout
             )
 
-            if response.status == 200:
+            if response.status_code == 200:
                 reverse_data = response.json()
                 processed_data = self._process_reverse_geocode_response(reverse_data, latitude, longitude)
 
@@ -463,16 +433,23 @@ class ExternalAPIService:
         """
         waypoints = []
         geometry = route.get('geometry', {})
-        coordinates = geometry.get('coordinates', [])
 
-        # Extract waypoints from coordinates
-        for i, coord in enumerate(coordinates[::10]):
-            waypoints.append({
-                'sequence': i,
-                'longitude': coord[0],
-                'latitude': coord[1],
-                'elevation': coord[2] if len(coord) > 2 else None
-            })
+        if isinstance(geometry, str):
+            print(f"Geometry is encoded string, length: {len(geometry)}")
+            return waypoints
+        
+        if isinstance(geometry, dict):
+            coordinates = geometry.get('coordinates', [])
+
+            # Extract waypoints from coordinates (every 10th point to reduce data)
+            for i, coord in enumerate(coordinates[::10]):
+                if len(coord) >= 2:  # Ensure we have at least lat/lng
+                    waypoints.append({
+                        'sequence': i,
+                        'longitude': coord[0],
+                        'latitude': coord[1],
+                        'elevation': coord[2] if len(coord) > 2 else None
+                    })
         
         return waypoints
     
@@ -512,17 +489,29 @@ class ExternalAPIService:
             Dict with API status information
         """
         try:
-            # health check request
+            headers = {
+                'Authorization': self.openrouteservice_api_key,
+            }
+            
+            params = {
+                'api_key': self.openrouteservice_api_key,
+                'text': 'London',
+                'size': 1,
+            }
+            
             response = requests.get(
-                f"{self.openrouteservice_base_url}/health",
+                f"{self.geocoding_base_url}/search",
+                headers=headers,
+                params=params,
                 timeout=10
             )
 
             return {
                 'openrouteservice': {
                     'status': 'available' if response.status_code == 200 else 'unavailable',
-                    'response_time': response.elapsed.total_seconds() * 1000, # convert to milliseconds
-                    'api_key_configured': bool(self.openrouteservice_api_key)
+                    'response_time': response.elapsed.total_seconds() * 1000,  # Convert to milliseconds
+                    'api_key_configured': bool(self.openrouteservice_api_key),
+                    'status_code': response.status_code
                 }
             }
         

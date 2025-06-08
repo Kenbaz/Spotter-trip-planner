@@ -37,6 +37,7 @@ INSTALLED_APPS = [
     'whitenoise.runserver_nostatic',
 
     'trip_api',
+    'users',
 ]
 
 MIDDLEWARE = [
@@ -113,6 +114,8 @@ AUTH_PASSWORD_VALIDATORS = [
     },
 ]
 
+AUTH_USER_MODEL = 'users.User'
+
 
 # Internationalization
 # https://docs.djangoproject.com/en/5.2/topics/i18n/
@@ -163,10 +166,44 @@ REST_FRAMEWORK = {
     ],
 }
 
+# JWT Settings
+SIMPLE_JWT = {
+    'ACCESS_TOKEN_LIFETIME': timedelta(hours=8), 
+    'REFRESH_TOKEN_LIFETIME': timedelta(days=7),
+    'ROTATE_REFRESH_TOKENS': True,
+    'BLACKLIST_AFTER_ROTATION': True,
+    'UPDATE_LAST_LOGIN': True,
+    'ALGORITHM': 'HS256',
+    'SIGNING_KEY': SECRET_KEY,
+    'VERIFYING_KEY': None,
+    'AUTH_HEADER_TYPES': ('Bearer',),
+    'USER_ID_FIELD': 'id',
+    'USER_ID_CLAIM': 'user_id',
+    'AUTH_TOKEN_CLASSES': ('rest_framework_simplejwt.tokens.AccessToken',),
+    'TOKEN_TYPE_CLAIM': 'token_type',
+}
+
+# Session configuration
+SESSION_COOKIE_AGE = 60 * 60 * 8  # 8 hours
+SESSION_COOKIE_SECURE = not DEBUG
+SESSION_COOKIE_HTTPONLY = True
+SESSION_COOKIE_SAMESITE = 'Strict'
+
 # CSRF configuration
 CSRF_COOKIE_SECURE = not DEBUG
 CSRF_COOKIE_HTTPONLY = True
 CSRF_COOKIE_SAMESITE = 'Strict'
+
+# Company-specific settings
+SPOTTER_SETTINGS = {
+    'COMPANY_NAME': 'Spotter',
+    'DEFAULT_TIMEZONE': 'America/Chicago',
+    'DEFAULT_DUTY_CYCLE': '70_8',
+    'MAX_DRIVING_HOURS': 11,
+    'MAX_DUTY_HOURS': 14,
+    'REQUIRED_BREAK_MINUTES': 30,
+    'RESET_HOURS_34': 34,
+}
 
 HOS_SETTINGS = {
     'MAX_DRIVING_HOURS': 11,
@@ -192,7 +229,7 @@ CACHES = {
         'LOCATION': REDIS_URL,
         'OPTIONS': {
             'CLIENT_CLASS': 'django_redis.client.DefaultClient',
-            'PARSER_CLASS': 'redis.connection.HiredisParser',
+            # 'PARSER_CLASS': 'redis.connection.HiredisParser',
             'CONNECTION_POOL_KWARGS': {
                 'max_connections': 50,
                 'retry_on_timeout': True,
@@ -206,7 +243,7 @@ CACHES = {
         'LOCATION': REDIS_URL.replace('/1', '/2'),
         'OPTIONS': {
             'CLIENT_CLASS': 'django_redis.client.DefaultClient',
-            'PARSER_CLASS': 'redis.connection.HiredisParser',
+            # 'PARSER_CLASS': 'redis.connection.HiredisParser',
         },
         'KEY_PREFIX': 'api_responses',
         'TIMEOUT': 3600,
@@ -216,7 +253,7 @@ CACHES = {
         'LOCATION': REDIS_URL.replace('/1', '/3'),
         'OPTIONS': {
             'CLIENT_CLASS': 'django_redis.client.DefaultClient',
-            'PARSER_CLASS': 'redis.connection.HiredisParser',
+            # 'PARSER_CLASS': 'redis.connection.HiredisParser',
         },
         'KEY_PREFIX': 'hos_calculations',
         'TIMEOUT': 1800,

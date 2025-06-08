@@ -1,10 +1,10 @@
 # trip_api/services/hos_calculator.py
 
 from datetime import datetime, timedelta
-from typing import List, Dict
+from typing import List, Dict, Optional
 from decimal import Decimal
 from django.conf import settings
-from django.core.cache import cache
+from django.core.cache import cache, caches
 import hashlib
 import json
 from ..models import Trip, HOSPeriod, ComplianceReport
@@ -17,7 +17,7 @@ class HOSCalculatorService:
 
     def __init__(self):
         self.hos_settings = getattr(settings, 'HOS_SETTINGS', {})
-        self.max_driving_hours = self.hos_settings.get('max_driving_hours', 11)
+        self.max_driving_hours = self.hos_settings.get('MAX_DRIVING_HOURS', 11)
         self.max_on_duty_hours = self.hos_settings.get('MAX_ON_DUTY_HOURS', 14)
         self.required_off_duty_hours = self.hos_settings.get('REQUIRED_OFF_DUTY_HOURS', 10)
         self.max_hours_before_break = self.hos_settings.get('MAX_HOURS_BEFORE_BREAK', 8)
@@ -25,41 +25,60 @@ class HOSCalculatorService:
         self.weekly_driving_limit = self.hos_settings.get('WEEKLY_DRIVING_LIMIT', 70)
         self.cycle_days = self.hos_settings.get('CYCLE_DAYS', 8)
     
+    def _get_cache(self, cache_name='default'):
+        """Get cache instance with fallback"""
+        try:
+            if hasattr(caches, cache_name) and cache_name in caches:
+                return caches[cache_name]
+            else:
+                return cache
+        except Exception:
+            return cache
+    
     def validate_daily_driving_limits(self, driving_hours: Decimal) -> Dict[str, any]:
+        """
+        Validate daily driving hour limits (11-hour rule)
+        """
         is_compliant = driving_hours <= self.max_driving_hours
 
         return {
             'is_compliant': is_compliant,
-            'driving_hours': driving_hours,
+            'driving_hours': float(driving_hours),
             'limit': self.max_driving_hours,
-            'violation_hours': max(0, driving_hours - self.max_driving_hours),
-            'remaining_hours': max(0, self.max_driving_hours - driving_hours)
+            'violation_hours': float(max(0, driving_hours - self.max_driving_hours)),
+            'remaining_hours': float(max(0, self.max_driving_hours - driving_hours))
         }
     
     def validate_daily_on_duty_limits(self, on_duty_hours: Decimal) -> Dict[str, any]:
+        """
+        Validate daily on-duty hour limits (14-hour rule)
+        """
         is_compliant = on_duty_hours <= self.max_on_duty_hours
 
         return {
             'is_compliant': is_compliant,
-            'on_duty_hours': on_duty_hours,
+            'on_duty_hours': float(on_duty_hours),
             'limit': self.max_on_duty_hours,
-            'violation_hours': max(0, on_duty_hours - self.max_on_duty_hours),
-            'remaining_hours': max(0, self.max_on_duty_hours - on_duty_hours)
+            'violation_hours': float(max(0, on_duty_hours - self.max_on_duty_hours)),
+            'remaining_hours': float(max(0, self.max_on_duty_hours - on_duty_hours))
         }
     
     def validate_off_duty_requirements(self, off_duty_hours: Decimal) -> Dict[str, any]:
+        """
+        Validate off-duty time requirements (10-hour rule)
+        """
         is_compliant = off_duty_hours >= self.required_off_duty_hours
 
         return {
             'is_compliant': is_compliant,
-            'off_duty_hours': off_duty_hours,
+            'off_duty_hours': float(off_duty_hours),
             'required_hours': self.required_off_duty_hours,
-            'deficit_hours': max(0, self.required_off_duty_hours - off_duty_hours),
+            'deficit_hours': float(max(0, self.required_off_duty_hours - off_duty_hours)),
         }
     
-    def validate_30_minutes_break_requirement(self, driving_periods: List[HOSPeriod]) -> Dict[str, any]:
+    def validate_30_minute_break_requirement(self, driving_periods: List[HOSPeriod]) -> Dict[str, any]:
         """
-        Validate 30-minute break requirement after 8 hours of driving.
+        Validate 30-minute break requirement after 8 hours of driving
         """
         continuous_driving_hours = Decimal('0')
         breaks_taken = 0
@@ -67,6 +86,7 @@ class HOSCalculatorService:
         violations = []
 
         current_driving_start = None
+        last_break_end = None
 
         for period in driving_periods:
             if period.duty_status == 'driving':
@@ -75,23 +95,25 @@ class HOSCalculatorService:
                 
                 continuous_driving_hours += Decimal(period.duration_minutes) / 60
 
-                # check if 8 hours driving limit have been exceeded without a break
+                # Check if 8 hours driving limit has been exceeded without a break
                 if continuous_driving_hours > self.max_hours_before_break:
                     breaks_required += 1
                     violations.append({
                         'type': 'missing_30minute_break',
-                        'period_start': current_driving_start,
-                        'period_end': period.end_datetime,
-                        'continuous_hours': float(continuous_driving_hours)
+                        'period_start': current_driving_start.isoformat(),
+                        'period_end': period.end_datetime.isoformat(),
+                        'continuous_hours': float(continuous_driving_hours),
+                        'description': f'Drove {float(continuous_driving_hours):.2f} hours without required 30-minute break'
                     })
             
             elif period.duty_status in ['off_duty', 'sleeper_berth']:
-                # check if the break is sufficient
-                break_miutes = period.duration_minutes
-                if break_miutes >= self.required_break_minutes:
+                # Check if the break is sufficient (30 minutes minimum)
+                break_minutes = period.duration_minutes
+                if break_minutes >= self.required_break_minutes:
                     breaks_taken += 1
                     continuous_driving_hours = Decimal('0')
                     current_driving_start = None
+                    last_break_end = period.end_datetime
         
         is_compliant = len(violations) == 0
 
@@ -100,37 +122,52 @@ class HOSCalculatorService:
             'breaks_required': breaks_required,
             'breaks_taken': breaks_taken,
             'violations': violations,
+            'continuous_driving_hours': float(continuous_driving_hours),
+            'last_break_end': last_break_end.isoformat() if last_break_end else None
         }
     
-    def calculate_weekly_hours(self, periods: List[HOSPeriod], reference_data: datetime) -> Dict[str, any]:
-        cycle_start = reference_data - timedelta(days=self.cycle_days-1)
-        cycle_end = reference_data + timedelta(days=1)
+    def calculate_weekly_hours(self, periods: List[HOSPeriod], reference_date: datetime) -> Dict[str, any]:
+        """
+        Calculate weekly driving hours within the 8-day cycle
+        
+        Args:
+            periods: List of HOS periods
+            reference_date: Reference date for calculating the 8-day cycle
+        """
+        cycle_start = reference_date - timedelta(days=self.cycle_days-1)
+        cycle_end = reference_date + timedelta(days=1)
 
         total_driving_hours = Decimal('0')
+        driving_days = set()
 
         for period in periods:
-            if (period.duty_status == 'driving' and cycle_start <= period.start_datetime <= cycle_end):
+            if (period.duty_status == 'driving' and 
+                cycle_start <= period.start_datetime <= cycle_end):
                 total_driving_hours += Decimal(period.duration_minutes) / 60
+                driving_days.add(period.start_datetime.date())
         
         is_compliant = total_driving_hours <= self.weekly_driving_limit
 
         return {
             'is_compliant': is_compliant,
-            'total_driving_hours': total_driving_hours,
+            'total_driving_hours': float(total_driving_hours),
             'limit': self.weekly_driving_limit,
-            'remaining_hours': max(0, self.weekly_driving_limit - total_driving_hours),
-            'cycle_start': cycle_start,
-            'cycle_end': cycle_end
+            'remaining_hours': float(max(0, self.weekly_driving_limit - total_driving_hours)),
+            'cycle_start': cycle_start.isoformat(),
+            'cycle_end': cycle_end.isoformat(),
+            'driving_days_count': len(driving_days)
         }
     
-    def calculate_required_breaks(self, trip_duration_hours: Decimal) -> List[Dict[str, any]]:
-        """Calculate required breaks based on trip duration"""
+    def calculate_required_breaks(self, trip_duration_hours: Decimal, driving_hours: Decimal) -> List[Dict[str, any]]:
+        """
+        Calculate required breaks based on trip duration and driving time
+        """
         required_breaks = []
         accumulated_driving = Decimal('0')
         break_count = 0
 
-        # 30 minutes break every 8 hours of driving
-        while accumulated_driving + self.max_hours_before_break < trip_duration_hours:
+        # 30-minute break every 8 hours of driving
+        while accumulated_driving + self.max_hours_before_break < driving_hours:
             accumulated_driving += self.max_hours_before_break
             break_count += 1
 
@@ -138,10 +175,11 @@ class HOSCalculatorService:
                 'type': 'mandatory_break',
                 'duration_minutes': self.required_break_minutes,
                 'after_driving_hours': float(accumulated_driving),
-                'break_number': break_count
+                'break_number': break_count,
+                'description': f'30-minute break required after {float(accumulated_driving)} hours of driving'
             })
         
-        # daily resets for multi-day trips
+        # Daily resets for multi-day trips (when exceeding 14-hour on-duty window)
         if trip_duration_hours > self.max_on_duty_hours:
             days_required = int(trip_duration_hours / self.max_on_duty_hours)
 
@@ -149,19 +187,24 @@ class HOSCalculatorService:
                 required_breaks.append({
                     'type': 'daily_reset',
                     'duration_minutes': self.required_off_duty_hours * 60,
-                    'after_driving_hours': float(day * self.max_on_duty_hours),
-                    'day_number': day
+                    'after_hours': float(day * self.max_on_duty_hours),
+                    'day_number': day,
+                    'description': f'10-hour reset required after day {day} (14-hour on-duty limit)'
                 })
         
         return required_breaks
     
     def _generate_feasibility_cache_key(self, trip: Trip, estimated_driving_hours: Decimal) -> str:
+        """
+        Generate cache key for trip feasibility calculations
+        """
         cache_data = {
             'trip_id': str(trip.trip_id),
             'estimated_driving_hours': float(estimated_driving_hours),
             'pickup_duration': trip.pickup_duration_minutes,
             'delivery_duration': trip.delivery_duration_minutes,
-            'departure_time': trip.departure_datetime.isoformat()
+            'departure_time': trip.departure_datetime.isoformat(),
+            'max_fuel_distance': trip.max_fuel_distance_miles
         }
 
         cache_string = json.dumps(cache_data, sort_keys=True)
@@ -171,11 +214,16 @@ class HOSCalculatorService:
     
     def validate_trip_feasibility(self, trip: Trip, estimated_driving_hours: Decimal) -> Dict[str, any]:
         """
-        Validate if the trip can be completed within HOS limits.
+        Validate if the trip can be completed within HOS limits
         """
         cache_key = self._generate_feasibility_cache_key(trip, estimated_driving_hours)
 
-        cached_result = cache.get(cache_key, using='hos_calculations')
+        try:
+            hos_cache = self._get_cache('hos_calculations')
+            cached_result = hos_cache.get(cache_key)
+        except Exception:
+            cached_result = cache.get(cache_key)
+            
         if cached_result:
             return cached_result
 
@@ -185,6 +233,8 @@ class HOSCalculatorService:
             'violations': [],
             'estimated_completion_time': None,
             'modifications_needed': [],
+            'total_trip_hours': 0,
+            'total_break_hours': 0
         }
 
         # Check if estimated driving hours exceed daily limits
@@ -194,26 +244,34 @@ class HOSCalculatorService:
                 'type': 'daily_driving_limit_exceeded',
                 'details': daily_validation
             })
-            feasibility_report['modifications_needed'].append({
-                'Trip must be split across multiple days due to 11-hour drving limit'
-            })
+            feasibility_report['modifications_needed'].append(
+                'Trip must be split across multiple days due to 11-hour driving limit'
+            )
+            feasibility_report['is_feasible'] = False
         
-        required_breaks = self.calculate_required_breaks(estimated_driving_hours)
+        # Calculate total trip time including non-driving activities
+        total_trip_minutes = (estimated_driving_hours * 60) + trip.pickup_duration_minutes + trip.delivery_duration_minutes
+        
+        # Calculate required breaks
+        required_breaks = self.calculate_required_breaks(
+            Decimal(total_trip_minutes) / 60, 
+            estimated_driving_hours
+        )
         feasibility_report['required_breaks'] = required_breaks
 
-        # Calculate total trip time including breaks
+        # Add break time to total trip time
         total_break_time = sum(
             break_info['duration_minutes'] for break_info in required_breaks
         )
+        total_trip_minutes += total_break_time
 
-        total_trip_minutes = (estimated_driving_hours * 60) + total_break_time
+        feasibility_report['total_break_hours'] = total_break_time / 60
+        feasibility_report['total_trip_hours'] = total_trip_minutes / 60
 
-        # Add pickup and delivery time
-        total_trip_minutes += trip.pickup_duration_minutes + trip.delivery_duration_minutes
-
+        # Calculate estimated completion time
         feasibility_report['estimated_completion_time'] = (
             trip.departure_datetime + timedelta(minutes=int(total_trip_minutes))
-        )
+        ).isoformat()
 
         # Check if trip exceeds 14-hour on-duty window
         total_on_duty_hours = Decimal(total_trip_minutes) / 60
@@ -224,18 +282,23 @@ class HOSCalculatorService:
                 'type': 'daily_on_duty_limit_exceeded',
                 'details': on_duty_validation
             })
-            feasibility_report['modifications_needed'].append({
+            feasibility_report['modifications_needed'].append(
                 'Trip requires daily reset (10-hour off-duty period) due to 14-hour limit'
-            })
+            )
             feasibility_report['is_feasible'] = False
         
-        cache.set(cache_key, feasibility_report, timeout=1800, using='hos_calculations')
+        # Cache the result
+        try:
+            hos_cache = self._get_cache('hos_calculations')
+            hos_cache.set(cache_key, feasibility_report, timeout=1800)
+        except Exception:
+            cache.set(cache_key, feasibility_report, timeout=1800)
 
         return feasibility_report
     
     def generate_compliance_report(self, trip: Trip) -> ComplianceReport:
         """
-        comprehensive compliance report for a trip
+        Generate comprehensive compliance report for a trip
         """
         periods = trip.hos_periods.all().order_by('start_datetime')
         
@@ -259,34 +322,62 @@ class HOSCalculatorService:
         violations = []
         warnings = []
         
+        # Daily driving validation
         daily_driving = self.validate_daily_driving_limits(total_driving_hours)
         if not daily_driving['is_compliant']:
             violations.append({
                 'type': 'daily_driving_limit',
                 'details': daily_driving
             })
+        elif daily_driving['remaining_hours'] <= 1:
+            warnings.append({
+                'type': 'approaching_driving_limit',
+                'message': f"Only {daily_driving['remaining_hours']:.2f} hours remaining for driving"
+            })
         
+        # Daily on-duty validation
         daily_on_duty = self.validate_daily_on_duty_limits(total_on_duty_hours)
         if not daily_on_duty['is_compliant']:
             violations.append({
                 'type': 'daily_on_duty_limit',
                 'details': daily_on_duty
             })
+        elif daily_on_duty['remaining_hours'] <= 2:
+            warnings.append({
+                'type': 'approaching_on_duty_limit',
+                'message': f"Only {daily_on_duty['remaining_hours']:.2f} hours remaining for on-duty time"
+            })
         
-        off_duty_validation = self.validate_off_duty_requirement(total_off_duty_hours)
+        # Off-duty validation
+        off_duty_validation = self.validate_off_duty_requirements(total_off_duty_hours)
         if not off_duty_validation['is_compliant']:
             violations.append({
                 'type': 'insufficient_off_duty',
                 'details': off_duty_validation
             })
         
-        driving_periods = [p for p in periods if p.duty_status == 'driving']
+        # Break validation
+        driving_periods = [p for p in periods if p.duty_status in ['driving', 'off_duty', 'sleeper_berth']]
         break_validation = self.validate_30_minute_break_requirement(driving_periods)
         if not break_validation['is_compliant']:
-            violations.extend(break_validation['violations'])
+            for violation in break_validation['violations']:
+                violations.append({
+                    'type': 'missing_30min_break',
+                    'details': violation
+                })
+        
+        # Weekly hours validation (if we have historical data)
+        if periods:
+            reference_date = periods[0].start_datetime
+            weekly_validation = self.calculate_weekly_hours(periods, reference_date)
+            if not weekly_validation['is_compliant']:
+                violations.append({
+                    'type': 'weekly_driving_limit',
+                    'details': weekly_validation
+                })
         
         # Calculate compliance score
-        total_checks = 4
+        total_checks = 4  # daily driving, daily on-duty, off-duty, breaks
         passed_checks = sum([
             daily_driving['is_compliant'],
             daily_on_duty['is_compliant'],
@@ -316,6 +407,36 @@ class HOSCalculatorService:
         )
         
         return compliance_report
-
-
+    
+    def calculate_optimal_departure_time(self, trip: Trip, estimated_driving_hours: Decimal, desired_arrival_time: Optional[datetime] = None) -> Dict[str, any]:
+        """
+        Calculate optimal departure time based on HOS constraints
+        """
+        feasibility = self.validate_trip_feasibility(trip, estimated_driving_hours)
         
+        if not feasibility['is_feasible']:
+            return {
+                'success': False,
+                'error': 'Trip is not feasible under current HOS regulations',
+                'violations': feasibility['violations'],
+                'modifications_needed': feasibility['modifications_needed']
+            }
+        
+        # Calculate minimum trip time including all breaks
+        minimum_trip_hours = feasibility['total_trip_hours']
+        
+        if desired_arrival_time:
+            # Work backwards from desired arrival
+            optimal_departure = desired_arrival_time - timedelta(hours=minimum_trip_hours)
+        else:
+            # Use trip's current departure time
+            optimal_departure = trip.departure_datetime
+        
+        return {
+            'success': True,
+            'optimal_departure_time': optimal_departure.isoformat(),
+            'minimum_trip_hours': minimum_trip_hours,
+            'estimated_arrival_time': feasibility['estimated_completion_time'],
+            'required_breaks': feasibility['required_breaks'],
+            'is_feasible': True
+        }

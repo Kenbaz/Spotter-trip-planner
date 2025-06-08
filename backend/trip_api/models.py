@@ -1,13 +1,55 @@
 # trip_api/models.py
 
 from django.db import models
+from django.contrib.auth import get_user_model
 from django.core.validators import MinValueValidator, MaxValueValidator
+from users.models import SpotterCompany, DriverVehicleAssignment
 import uuid
+
+User = get_user_model()
 
 
 class Trip(models.Model):
     trip_id = models.UUIDField(default=uuid.uuid4, editable=False, unique=True)
 
+    driver = models.ForeignKey(
+        User,
+        on_delete=models.CASCADE,
+        related_name='trips',
+        limit_choices_to={'is_driver': True, 'is_active_driver': True},
+        help_text="Driver who owns this trip"
+    )
+    
+    assigned_vehicle = models.ForeignKey(
+        'users.Vehicle',
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name='trips',
+        help_text="Vehicle assigned for this trip"
+    )
+    
+    company = models.ForeignKey(
+        'users.SpotterCompany',
+        on_delete=models.CASCADE,
+        related_name='trips',
+        help_text="Company this trip belongs to."
+    )
+
+    status = models.CharField(
+        max_length=20,
+        choices=[
+            ('draft', 'Draft'),
+            ('planned', 'Planned'),
+            ('in_progress', 'In Progress'),
+            ('completed', 'Completed'),
+            ('cancelled', 'Cancelled'),
+        ],
+        default='draft',
+        help_text="Current status of the trip"
+    )
+
+    # Existing location fields
     current_address = models.CharField(max_length=500)
     current_latitude = models.DecimalField(max_digits=10, decimal_places=7)
     current_longitude = models.DecimalField(max_digits=10, decimal_places=7)
@@ -18,6 +60,7 @@ class Trip(models.Model):
 
     departure_datetime = models.DateTimeField()
 
+    # Vehicle-specific settings - UPDATED with defaults from vehicle
     max_fuel_distance_miles = models.PositiveBigIntegerField(
         default=1000,
         validators=[MinValueValidator(200), MaxValueValidator(1200)],
@@ -34,6 +77,7 @@ class Trip(models.Model):
         help_text="Estimated delivery duration in minutes"
     )
 
+    # Calculated fields
     total_distance_miles = models.DecimalField(
         max_digits=8, decimal_places=2, null=True, blank=True,
         help_text="Total distance of the trip in miles"
@@ -50,13 +94,81 @@ class Trip(models.Model):
 
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
+    created_by = models.ForeignKey(
+        User,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name='trips_created',
+        help_text="User who created this trip"
+    )
 
     class Meta:
         ordering = ['-created_at']
+        indexes = [
+            models.Index(fields=['driver', '-created_at']),
+            models.Index(fields=['company', '-created_at']),
+            models.Index(fields=['status', '-created_at']),
+            models.Index(fields=['assigned_vehicle', '-created_at']),
+        ]
 
     def __str__(self):
-        return f"Trip {self.trip_id} from {self.current_address} to {self.destination_address}"
+        return f"Trip {self.trip_id} - {self.driver.full_name} ({self.current_address} → {self.destination_address})"
     
+    def save(self, *args, **kwargs):
+        """Override save to set company and default vehicle assignment"""
+        # Ensure company is set if not specified
+        if not self.company:
+            self.company = SpotterCompany.get_company_instance()
+        
+        # Auto-assign driver's current vehicle if not specified
+        if not self.assigned_vehicle and self.driver:
+            current_assignment = DriverVehicleAssignment.objects.filter(
+                driver=self.driver,
+                is_active=True
+            ).first()
+            if current_assignment:
+                self.assigned_vehicle = current_assignment.vehicle
+        
+        # Set created_by to driver if not specified
+        if not self.created_by and self.driver:
+            self.created_by = self.driver
+        
+        super().save(*args, **kwargs)
+    
+    @property
+    def driver_name(self):
+        """Get driver's full name"""
+        return self.driver.full_name if self.driver else "Unknown Driver"
+    
+    @property
+    def vehicle_info(self):
+        """Get vehicle information"""
+        if self.assigned_vehicle:
+            return f"{self.assigned_vehicle.unit_number} ({self.assigned_vehicle.year} {self.assigned_vehicle.make})"
+        return "No Vehicle Assigned"
+    
+    @property
+    def is_editable(self):
+        """Check if trip can be edited"""
+        return self.status in ['draft', 'planned']
+    
+    @property
+    def compliance_summary(self):
+        """Get compliance summary"""
+        latest_report = self.compliance_reports.first()
+        if latest_report:
+            return {
+                'is_compliant': latest_report.is_compliant,
+                'score': latest_report.compliance_score,
+                'violations_count': len(latest_report.violations)
+            }
+        return {
+            'is_compliant': False,
+            'score': 0,
+            'violations_count': 0
+        }
+
 
 class Route(models.Model):
     """
@@ -69,7 +181,7 @@ class Route(models.Model):
         help_text="The trip associated with this route"
     )
 
-    # external api route data
+    # External API route data
     route_geometry = models.JSONField(help_text="GeoJSON LineString geometry")
     route_instructions = models.JSONField(help_text="Turn-by-turn directions")
 
@@ -79,7 +191,20 @@ class Route(models.Model):
     external_route_id = models.CharField(max_length=100, blank=True)
     api_provider = models.CharField(max_length=50, default='openrouteservice')
 
+    calculated_by = models.ForeignKey(
+        User,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name='routes_calculated',
+        help_text="User who calculated this route"
+    )
     created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        indexes = [
+            models.Index(fields=['trip', '-created_at']),
+        ]
 
     def __str__(self):
         return f"Route for {self.trip}"
@@ -96,6 +221,7 @@ class Stops(models.Model):
         ('rest', 'Rest Break'),
         ('mandatory_break', 'Mandatory 30-min Break'),
         ('daily_reset', 'Daily 10-hour Reset'),
+        ('fuel_and_break', 'Combined Fuel & Break'),
     ]
 
     trip = models.ForeignKey(
@@ -109,8 +235,8 @@ class Stops(models.Model):
     sequence_order = models.PositiveIntegerField()
 
     address = models.CharField(max_length=500)
-    latitude = models.DecimalField(max_digits=10, decimal_places=7)
-    longitude = models.DecimalField(max_digits=10, decimal_places=7)
+    latitude = models.DecimalField(max_digits=10, decimal_places=7, null=True, blank=True)
+    longitude = models.DecimalField(max_digits=10, decimal_places=7, null=True, blank=True)
 
     arrival_time = models.DateTimeField()
     departure_time = models.DateTimeField()
@@ -119,15 +245,29 @@ class Stops(models.Model):
     distance_from_origin_miles = models.DecimalField(max_digits=8, decimal_places=2)
     distance_to_next_stop_miles = models.DecimalField(max_digits=8, decimal_places=2, null=True, blank=True)
 
+    # Compliance and optimization fields
     is_required_for_compliance = models.BooleanField(default=False)
+    is_optimized_stop = models.BooleanField(
+        default=False,
+        help_text="Whether this stop was created through route optimization"
+    )
+    optimization_notes = models.TextField(
+        blank=True,
+        help_text="Notes about optimizations applied to this stop"
+    )
+    
     created_at = models.DateTimeField(auto_now_add=True)
 
     class Meta:
         ordering = ['trip', 'sequence_order']
         unique_together = ('trip', 'sequence_order')
+        indexes = [
+            models.Index(fields=['trip', 'sequence_order']),
+            models.Index(fields=['trip', 'stop_type']),
+        ]
     
     def __str__(self):
-        return f"{self.get_stop_type_display()} - {self.address}"
+        return f"{self.get_stop_type_display()} - {self.address} (Trip: {self.trip.trip_id})"
 
 
 class HOSPeriod(models.Model):
@@ -166,15 +306,30 @@ class HOSPeriod(models.Model):
     is_compliant = models.BooleanField(default=True)
     compliance_notes = models.TextField(blank=True)
     
-    related_stop = models.ForeignKey(Stops, on_delete=models.SET_NULL, null=True, blank=True)
+    related_stop = models.ForeignKey(
+        Stops, 
+        on_delete=models.SET_NULL, 
+        null=True, 
+        blank=True,
+        related_name='hos_periods'
+    )
     
+    verified_by_driver = models.BooleanField(
+        default=False,
+        help_text="Whether this period has been verified by the driver"
+    )
     created_at = models.DateTimeField(auto_now_add=True)
     
     class Meta:
         ordering = ['trip', 'start_datetime']
+        indexes = [
+            models.Index(fields=['trip', 'start_datetime']),
+            models.Index(fields=['trip', 'duty_status']),
+            models.Index(fields=['duty_status', 'start_datetime']),
+        ]
     
     def __str__(self):
-        return f"{self.get_duty_status_display()} - {self.start_datetime} to {self.end_datetime}"
+        return f"{self.get_duty_status_display()} - {self.start_datetime} to {self.end_datetime} (Trip: {self.trip.trip_id})"
 
 
 class ComplianceReport(models.Model):
@@ -211,7 +366,27 @@ class ComplianceReport(models.Model):
     required_daily_resets = models.PositiveIntegerField(default=0)
     scheduled_daily_resets = models.PositiveIntegerField(default=0)
     
+    generated_by = models.ForeignKey(
+        User,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name='compliance_reports_generated',
+        help_text="User who generated this report"
+    )
+    reviewed_by_fleet_manager = models.BooleanField(
+        default=False,
+        help_text="Whether this report has been reviewed by fleet management"
+    )
+    
     created_at = models.DateTimeField(auto_now_add=True)
+    
+    class Meta:
+        ordering = ['-created_at']
+        indexes = [
+            models.Index(fields=['trip', '-created_at']),
+            models.Index(fields=['is_compliant', '-created_at']),
+        ]
     
     def __str__(self):
         return f"Compliance Report for {self.trip} - {'Compliant' if self.is_compliant else 'Non-Compliant'}"

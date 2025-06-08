@@ -41,21 +41,28 @@ class ELDGeneratorService:
         """Generate complete ELD log data for a trip"""
 
         try:
+            print(f"Generating ELD logs for trip: {trip.trip_id}")
             hos_periods = trip.hos_periods.all().order_by('start_datetime')
+            print(f"Found {len(hos_periods)} HOS periods")
 
             if not hos_periods:
+                print("No HOS periods found - this is the issue!")
                 return {
                     'success': False,
                     'error': 'No HOS periods found for trip',
                     'details': 'Cannot generate ELD log without duty status periods'
                 }
             
+            print("HOS periods found, continuing with ELD generation...")
+            
             # Group periods by day
             daily_logs = self._group_periods_by_day(hos_periods)
+            print(f"Grouped into {len(daily_logs)} daily logs")
 
             # Generate log data for each day
             eld_logs = []
             for log_date, periods in daily_logs.items():
+                print(f"Processing day: {log_date} with {len(periods)} periods")
                 daily_log = self._generate_daily_log(trip, log_date, periods)
                 eld_logs.append(daily_log)
 
@@ -76,6 +83,9 @@ class ELDGeneratorService:
             }
             
         except Exception as e:
+            print(f"Exception in generate_eld_log_data: {str(e)}")
+            import traceback
+            print(f"Traceback: {traceback.format_exc()}")
             return {
                 'success': False,
                 'error': 'Failed to generate ELD log data',
@@ -242,7 +252,7 @@ class ELDGeneratorService:
         if duty_status == 'driving':
             totals['total_driving'] += hours
         
-        for key, value in totals.time():
+        for key, value in totals.items():
             totals[key] = round(value, 2)  # Round to 2 decimal places
         
         return totals
