@@ -16,6 +16,25 @@ services:
     environment:
       - REDIS_URL=redis://redis:6379/1
     command: python manage.py runserver 0.0.0.0:8000
+  
+  frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+    image: trip_planner_frontend:dev
+    volumes:
+      - ./frontend:/app
+      - /app/node_modules
+    ports:
+      - "3000:3000"
+    depends_on:
+      - backend
+    env_file:
+      - ./frontend/.env
+    environment:
+      - NODE_ENV=development
+      - CHOKIDAR_USEPOLLING=true
+    command: npm run dev
 
   db:
     image: postgres:14
