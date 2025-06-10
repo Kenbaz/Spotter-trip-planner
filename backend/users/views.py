@@ -7,12 +7,14 @@ from rest_framework.pagination import PageNumberPagination
 from django.contrib.auth import get_user_model
 from django.db.models import Q
 from rest_framework_simplejwt.tokens import RefreshToken
+from rest_framework_simplejwt.views import TokenObtainPairView
+from rest_framework_simplejwt.serializers import TokenObtainPairSerializer
 from django_filters.rest_framework import DjangoFilterBackend
 
 from .serializers import (
     UserSerializer, CreateDriverSerializer, UpdateDriverSerializer,
     SpotterCompanySerializer, VehicleSerializer, DriverVehicleAssignmentSerializer,
-    DriverSummarySerializer, VehicleSummarySerializer
+    DriverSummarySerializer, VehicleSummarySerializer, LoginUserSerializer
 )
 from .models import SpotterCompany, Vehicle, DriverVehicleAssignment
 from .permissions import IsFleetManagerOrSuperAdmin, IsOwnerOrFleetManager
@@ -26,6 +28,19 @@ class UserPagination(PageNumberPagination):
     page_size = 20
     page_size_query_param = 'page_size'
     max_page_size = 100
+
+
+class CustomTokenObtainPairSerializer(TokenObtainPairSerializer):
+    def validate(self, attrs):
+        data = super().validate(attrs)
+        
+        user_serializer = LoginUserSerializer(self.user)
+        data['user'] = user_serializer.data
+        
+        return data
+
+class CustomTokenObtainPairView(TokenObtainPairView):
+    serializer_class = CustomTokenObtainPairSerializer
 
 
 class UserViewSet(viewsets.ModelViewSet):

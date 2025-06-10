@@ -8,6 +8,26 @@ from django.contrib.auth.password_validation import validate_password
 User = get_user_model()
 
 
+class LoginUserSerializer(serializers.ModelSerializer):
+    """
+    Simplified user serializer for login responses.
+    No dynamic field filtering to avoid authentication issues.
+    """
+    full_name = serializers.ReadOnlyField()
+    role_display = serializers.ReadOnlyField()
+
+    class Meta:
+        model = User
+        fields = [
+            'id', 'username', 'email', 'first_name', 'last_name',
+            'full_name', 'role_display', 'is_driver', 'is_fleet_manager', 
+            'is_super_admin', 'is_active_driver', 'employee_id', 'date_joined'
+        ]
+        read_only_fields = [
+            'id', 'date_joined', 'full_name', 'role_display'
+        ]
+        
+
 class UserSerializer(serializers.ModelSerializer):
     """
     Serializer for viewing user information.
@@ -32,14 +52,23 @@ class UserSerializer(serializers.ModelSerializer):
         fields = super().get_fields()
         request = self.context.get('request')
 
-        if request and request.user:
-            if request.user.has_fleet_management_access():
+        if request and request.user and request.user.is_authenticated:
+            # For authenticated users
+            if hasattr(request.user, 'has_fleet_management_access') and request.user.has_fleet_management_access():
                 allowed_fields = {
                     'id', 'username', 'email', 'first_name', 'last_name',
                     'phone_number', 'emergency_contact_name', 'emergency_contact_phone',
                     'full_name', 'role_display', 'date_joined' 
                 }
                 fields = {key: field for key, field in fields.items() if key in allowed_fields}
+            else:
+                # For unauthenticated users
+                safe_fields = {
+                    'id', 'username', 'first_name', 'last_name', 'full_name', 
+                    'role_display', 'is_driver', 'is_fleet_manager', 'is_super_admin',
+                    'is_active_driver', 'employee_id', 'date_joined'
+                }
+                fields = {key: field for key, field in fields.items() if key in safe_fields}
         return fields
 
 

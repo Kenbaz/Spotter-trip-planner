@@ -11,7 +11,7 @@ router.register(r'vehicles', views.VehicleViewSet, basename='vehicle')
 router.register(r'assignments', views.DriverVehicleAssignmentViewSet, basename='assignment')
 
 urlpatterns = [
-    path('login/', TokenObtainPairView.as_view(), name='token_obtain_pair'),
+    path('login/', views.CustomTokenObtainPairView.as_view(), name='token_obtain_pair'),
     path('auth/refresh/', TokenRefreshView.as_view(), name='token_refresh'),
      path('auth/verify/', TokenVerifyView.as_view(), name='token_verify'),
     path('', include(router.urls)),
