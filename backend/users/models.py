@@ -6,6 +6,8 @@ from django.utils.translation import gettext_lazy as _
 from django.core.exceptions import ValidationError
 from django.db import transaction
 from django.contrib.auth.models import Group
+from django.utils import timezone
+from django.core.validators import MinValueValidator, MaxValueValidator
 
 
 class User(AbstractUser):
@@ -356,4 +358,209 @@ class DriverVehicleAssignment(models.Model):
         def save(self, *args, **kwargs):
             self.full_clean()
             super().save(*args, **kwargs)
+
+
+class DriverCycleStatus(models.Model):
+    """Track driver's current HOS cycle status"""
+    driver = models.OneToOneField(
+        User,
+        on_delete=models.CASCADE,
+        related_name='cycle_status',
+        limit_choices_to={'is_driver': True},
+    )
+
+    # 8-day cycle tracking
+    cycle_start_date = models.DateTimeField(
+        help_text="Start of current 8-day cycle"
+    )
+    total_cycle_hours = models.FloatField(
+        default=0.0,
+        help_text="Total on-duty hours used in current 8-day cycle"
+    )
+
+    # Daily status tracking
+    last_daily_reset_start = models.DateTimeField(
+        blank=True, 
+        null=True,
+        help_text="When current daily reset (10-hour break) started"
+    )
+    last_daily_reset_end = models.DateTimeField(
+        null=True, blank=True,
+        help_text="When current daily reset ended"
+    )
+
+    # Current status
+    current_duty_status = models.CharField(
+        max_length=20,
+        choices=[
+            ('off_duty', 'Off Duty'),
+            ('sleeper_berth', 'Sleeper Berth'),
+            ('driving', 'Driving'),
+            ('on_duty_not_driving', 'On Duty (Not Driving)'),
+        ],
+        default='off_duty'
+    )
+    current_status_start = models.DateTimeField(
+        help_text="When current duty status started"
+    )
+
+    # Today's totals
+    today_driving_hours = models.FloatField(
+        default=0.0,
+        validators=[MinValueValidator(0), MaxValueValidator(11)],
+        help_text="Hours driven TODAY (out of 11 allowed)"
+    )
+    today_on_duty_hours = models.FloatField(
+        default=0.0,
+        validators=[MinValueValidator(0), MaxValueValidator(14)],
+        help_text="Hours on-duty TODAY (out of 14 allowed)"
+    )
+    today_date = models.DateField(
+        auto_now_add=True,
+        help_text="Date these daily totals apply to"
+    )
+
+    # Last break info
+    last_30min_break_end = models.DateTimeField(
+        null=True, blank=True,
+        help_text="Time the driver's last 30-minute break ended"
+    )
+    continuous_driving_since = models.DateTimeField(
+        null=True, blank=True,
+        help_text="Start time of current continuous driving period"
+    )
+    
+    updated_at = models.DateTimeField(auto_now=True)
+    
+    class Meta:
+        verbose_name = "Driver Cycle Status"
+        verbose_name_plural = "Driver Cycle Status"
+    
+    def __str__(self):
+        return f"{self.driver.full_name} - Cycle: {self.total_cycle_hours}/70 hrs"
+    
+    @property
+    def remaining_cycle_hours(self):
+        return max(0, 70 - self.total_cycle_hours)
+    
+    @property
+    def remaining_driving_hours_today(self):
+        return max(0, 11 - self.today_driving_hours)
+    
+    @property
+    def remaining_on_duty_hours_today(self):
+        return max(0, 14 - self.today_on_duty_hours)
+    
+    @property
+    def hours_since_last_break(self):
+        """Hours since last 30-minute break"""
+        if not self.continuous_driving_since:
+            return 0
+        
+        time_diff = timezone.now() - self.continuous_driving_since
+        return time_diff.total_seconds() / 3600
+    
+    @property
+    def needs_immediate_break(self):
+        """Does driver need 30-min break RIGHT NOW?"""
+        return (self.current_duty_status == 'driving' and 
+                self.hours_since_last_break >= 8)
+    
+    @property
+    def needs_daily_reset(self):
+        """Does driver need 10-hour daily reset?"""
+        return (self.today_on_duty_hours >= 14 or 
+                self.today_driving_hours >= 11)
+    
+    @property
+    def needs_cycle_reset(self):
+        """Does driver need 34-hour cycle reset?"""
+        return self.total_cycle_hours >= 70
+    
+    @property
+    def compliance_warnings(self):
+        """Get list of current compliance warnings"""
+        warnings = []
+        
+        if self.needs_immediate_break:
+            warnings.append({
+                'type': 'immediate_break_required',
+                'message': f'Must take 30-min break NOW (driving {self.hours_since_last_break:.1f} hours)',
+                'severity': 'critical'
+            })
+        
+        if self.remaining_driving_hours_today <= 1:
+            warnings.append({
+                'type': 'approaching_daily_driving_limit',
+                'message': f'Only {self.remaining_driving_hours_today:.1f} hours driving time left today',
+                'severity': 'warning'
+            })
+        
+        if self.remaining_on_duty_hours_today <= 2:
+            warnings.append({
+                'type': 'approaching_daily_on_duty_limit',
+                'message': f'Only {self.remaining_on_duty_hours_today:.1f} hours on-duty time left today',
+                'severity': 'warning'
+            })
+        
+        if self.remaining_cycle_hours <= 10:
+            warnings.append({
+                'type': 'approaching_cycle_limit',
+                'message': f'Only {self.remaining_cycle_hours:.1f} hours left in 8-day cycle',
+                'severity': 'warning'
+            })
+        
+        return warnings
+    
+    def can_start_trip(self, estimated_trip_hours):
+        """Check if driver can start a trip of given duration"""
+        if self.needs_immediate_break:
+            return False, "Must take 30-minute break before starting trip"
+        
+        if estimated_trip_hours > self.remaining_driving_hours_today:
+            return False, f"Trip requires {estimated_trip_hours} hours but only {self.remaining_driving_hours_today} hours remain today"
+        
+        if estimated_trip_hours > self.remaining_cycle_hours:
+            return False, f"Trip requires {estimated_trip_hours} hours but only {self.remaining_cycle_hours} hours remain in cycle"
+        
+        return True, "Driver can start trip"
+
+
+class DailyDrivingRecord(models.Model):
+    """Track daily driving records for the 8-day cycle"""
+    driver = models.ForeignKey(
+        User,
+        on_delete=models.CASCADE,
+        related_name='daily_records'
+    )
+    date = models.DateField()
+    
+    # Daily totals
+    total_driving_hours = models.FloatField(default=0.0)
+    total_on_duty_hours = models.FloatField(default=0.0)
+    total_off_duty_hours = models.FloatField(default=0.0)
+    
+    # Break tracking
+    had_30min_break = models.BooleanField(default=False)
+    break_start_time = models.DateTimeField(null=True, blank=True)
+    break_end_time = models.DateTimeField(null=True, blank=True)
+    
+    # Daily reset tracking
+    had_daily_reset = models.BooleanField(default=False)
+    reset_start_time = models.DateTimeField(null=True, blank=True)
+    reset_end_time = models.DateTimeField(null=True, blank=True)
+    
+    # Compliance
+    is_compliant = models.BooleanField(default=True)
+    violations = models.JSONField(default=list, help_text="List of HOS violations for this day")
+    
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+    
+    class Meta:
+        unique_together = ('driver', 'date')
+        ordering = ['-date']
+    
+    def __str__(self):
+        return f"{self.driver.full_name} - {self.date} - {self.total_driving_hours}h driving"
 

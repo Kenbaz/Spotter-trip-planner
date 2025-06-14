@@ -7,16 +7,50 @@ from .models import Trip, Route, Stops, HOSPeriod, ComplianceReport
 class TripAdmin(admin.ModelAdmin):
     list_display = [
         'trip_id', 
-        'current_address', 
-        'destination_address', 
+        'current_address',
+        'pickup_address', 
+        'delivery_address', 
         'departure_datetime',
         'is_hos_compliant',
         'created_at'
     ]
-    list_filter = ['is_hos_compliant', 'created_at']
-    search_fields = ['current_address', 'destination_address', 'trip_id']
+    list_filter = ['is_hos_compliant', 'created_at', 'status']
+    search_fields = [
+        'current_address', 'pickup_address', 'delivery_address', 
+        'trip_id', 'driver__first_name', 'driver__last_name'
+    ]
     readonly_fields = ['trip_id', 'created_at', 'updated_at']
     ordering = ['-created_at']
+    
+    fieldsets = (
+        ('Trip Identification', {
+            'fields': ('trip_id', 'driver', 'assigned_vehicle', 'company', 'status')
+        }),
+        ('Current Location', {
+            'fields': ('current_address', 'current_latitude', 'current_longitude')
+        }),
+        ('Pickup Location', {
+            'fields': ('pickup_address', 'pickup_latitude', 'pickup_longitude')
+        }),
+        ('Delivery Location', {
+            'fields': ('delivery_address', 'delivery_latitude', 'delivery_longitude')
+        }),
+        ('Timing', {
+            'fields': ('departure_datetime', 'pickup_duration_minutes', 'delivery_duration_minutes')
+        }),
+        ('Calculated Data', {
+            'fields': (
+                'total_distance_miles', 'deadhead_distance_miles', 'loaded_distance_miles',
+                'total_driving_time', 'deadhead_driving_time', 'loaded_driving_time',
+                'estimated_pickup_time', 'estimated_arrival_time', 'is_hos_compliant'
+            ),
+            'classes': ('collapse',)
+        }),
+        ('Audit', {
+            'fields': ('created_by', 'created_at', 'updated_at'),
+            'classes': ('collapse',)
+        })
+    )
 
 
 @admin.register(Route)

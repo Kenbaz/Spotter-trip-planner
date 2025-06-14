@@ -50,9 +50,26 @@ class Trip(models.Model):
     )
 
     # Existing location fields
-    current_address = models.CharField(max_length=500)
+    current_address = models.CharField(
+        max_length=500, 
+        help_text="Driver's current location"
+    )
     current_latitude = models.DecimalField(max_digits=10, decimal_places=7)
     current_longitude = models.DecimalField(max_digits=10, decimal_places=7)
+
+    pickup_address = models.CharField(
+        max_length=500,
+        help_text="Where to pick up cargo"
+    )
+    pickup_latitude = models.DecimalField(max_digits=10, decimal_places=7)
+    pickup_longitude = models.DecimalField(max_digits=10, decimal_places=7)
+
+    delivery_address = models.CharField(
+        max_length=500,
+        help_text="Final delivery location"
+    )
+    delivery_latitude = models.DecimalField(max_digits=10, decimal_places=7)
+    delivery_longitude = models.DecimalField(max_digits=10, decimal_places=7)
 
     destination_address = models.CharField(max_length=500)
     destination_latitude = models.DecimalField(max_digits=10, decimal_places=7)
@@ -82,14 +99,37 @@ class Trip(models.Model):
         max_digits=8, decimal_places=2, null=True, blank=True,
         help_text="Total distance of the trip in miles"
     )
+    deadhead_distance_miles = models.DecimalField(
+        max_digits=8, decimal_places=2, null=True, blank=True,
+        help_text="Distance from current location to pickup in miles"
+    )
+    loaded_distance_miles = models.DecimalField(
+        max_digits=8, decimal_places=2, null=True, blank=True,
+        help_text="Distance from pickup to delivery in miles"
+    )
+
     total_driving_time = models.DecimalField(
         max_digits=6, decimal_places=2, null=True, blank=True,
         help_text="Total driving time for the trip in hours"
     )
+    deadhead_driving_time = models.DecimalField(
+        max_digits=6, decimal_places=2, null=True, blank=True,
+        help_text="Driving time for deadhead leg in hours"
+    )
+    loaded_driving_time = models.DecimalField(
+        max_digits=6, decimal_places=2, null=True, blank=True,
+        help_text="Driving time for loaded leg in hours"
+    )
+
     estimated_arrival_time = models.DateTimeField(
         null=True, blank=True,
         help_text="Estimated arrival time at the destination"
     )
+    estimated_pickup_time = models.DateTimeField(
+        null=True, blank=True,
+        help_text="Estimated arrival time at pickup location"
+    )
+
     is_hos_compliant = models.BooleanField(default=False)
 
     created_at = models.DateTimeField(auto_now_add=True)
@@ -121,6 +161,12 @@ class Trip(models.Model):
         if not self.company:
             self.company = SpotterCompany.get_company_instance()
         
+        # Handle backward compatibility for destination fields
+        if self.delivery_address and not self.destination_address:
+            self.destination_address = self.delivery_address
+            self.destination_latitude = self.delivery_latitude
+            self.destination_longitude = self.delivery_longitude
+        
         # Auto-assign driver's current vehicle if not specified
         if not self.assigned_vehicle and self.driver:
             current_assignment = DriverVehicleAssignment.objects.filter(
@@ -135,6 +181,24 @@ class Trip(models.Model):
             self.created_by = self.driver
         
         super().save(*args, **kwargs)
+    
+    @property
+    def trip_legs(self):
+        """Get trip legs information"""
+        return {
+            'deadhead': {
+                'origin': self.current_address,
+                'destination': self.pickup_address,
+                'distance_miles': float(self.deadhead_distance_miles or 0),
+                'driving_time_hours': float(self.deadhead_driving_time or 0),
+            },
+            'loaded': {
+                'origin': self.pickup_address,
+                'destination': self.delivery_address,
+                'distance_miles': float(self.loaded_distance_miles or 0),
+                'driving_time_hours': float(self.loaded_driving_time or 0),
+            }
+        }
     
     @property
     def driver_name(self):

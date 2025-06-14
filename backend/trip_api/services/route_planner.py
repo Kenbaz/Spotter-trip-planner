@@ -11,6 +11,7 @@ import logging
 from ..models import Trip, Route, Stops, HOSPeriod
 from .hos_calculator import HOSCalculatorService
 from .external_apis import ExternalAPIService
+from users.models import DriverCycleStatus
 
 
 logger = logging.getLogger(__name__)
@@ -51,41 +52,96 @@ class RoutePlannerService:
         Analyze trip feasibility and returns Dict with feasibility analysis and route plan
         """
         try:
-            # Get route data from external API
-            route_data = self.external_api.get_route_data(
+            # Get driver's current cycle status
+            try:
+                driver_status = trip.driver.cycle_status
+                has_cycle_data = True
+            except DriverCycleStatus.DoesNotExist:
+                driver_status = None
+                has_cycle_data = False
+
+            # Current location → Pickup location (DEADHEAD)
+            deadhead_route = self.external_api.get_route_data(
                 origin=(float(trip.current_latitude), float(trip.current_longitude)),
-                destination=(float(trip.destination_latitude), float(trip.destination_longitude))
+                destination=(float(trip.pickup_latitude), float(trip.pickup_longitude))
             )
 
-            if not route_data['success']:
+            if not deadhead_route['success']:
                 return {
                     'success': False,
-                    'error': 'Unable to calculate route',
-                    'details': route_data.get('error', 'Unknown routing error')
+                    'error': 'Unable to calculate deadhead route',
+                    'details': deadhead_route.get('error', 'Unknown routing error')
                 }
             
-            # Extract route information
-            total_distance_miles = route_data['distance_miles']
-            estimated_driving_hours = route_data['duration_hours']
-
-            # Update trip with calculated values
-            trip.total_distance_miles = Decimal(str(total_distance_miles))
-            trip.total_driving_time = Decimal(str(estimated_driving_hours))
-
-            # Check feasibility with HOS calculator
-            feasibility_report = self.hos_calculator.validate_trip_feasibility(
-                trip,
-                Decimal(str(estimated_driving_hours))
+            # Pickup location → Delivery location (LOADED)
+            loaded_route = self.external_api.get_route_data(
+                origin=(float(trip.pickup_latitude), float(trip.pickup_longitude)),
+                destination=(float(trip.delivery_latitude), float(trip.delivery_longitude))
             )
 
+            if not loaded_route['success']:
+                return {
+                    'success': False,
+                    'error': 'Unable to calculate loaded route',
+                    'details': loaded_route.get('error', 'Unknown routing error')
+                }
+            
+            # Combine deadhead and loaded routes
+            combined_route_data = self._combine_route_legs(deadhead_route, loaded_route)
+            
+            # Extract total route information
+            total_distance_miles = deadhead_route['distance_miles'] + loaded_route['distance_miles']
+
+            total_driving_hours = deadhead_route['duration_hours'] + loaded_route['duration_hours']
+
+            total_distance_miles = Decimal(str(total_distance_miles))
+            total_driving_hours = Decimal(str(total_driving_hours))
+
+            # Update trip with calculated values
+            trip.deadhead_distance_miles = Decimal(str(deadhead_route['distance_miles']))
+            trip.loaded_distance_miles = Decimal(str(loaded_route['distance_miles']))
+            trip.total_distance_miles = total_distance_miles
+            
+            trip.deadhead_driving_time = Decimal(str(deadhead_route['duration_hours']))
+            trip.loaded_driving_time = Decimal(str(loaded_route['duration_hours']))
+            trip.total_driving_time = total_driving_hours
+
+
+            # Check feasibility with HOS calculator
+            if has_cycle_data:
+                feasibility_report = self.hos_calculator.validate_trip_feasibility_with_current_status(
+                    trip,
+                    total_driving_hours,
+                    driver_status
+                )
+            else:
+                # Fallback to basic feasibility without current status
+                feasibility_report = self.hos_calculator.validate_trip_feasibility(
+                    trip,
+                    total_driving_hours
+                )
+                feasibility_report['warning'] = 'No current HOS status provided - using basic validation only'
+
+
             # Generate detailed route plan with stops and breaks
-            route_plan = self._generate_route_plan(trip, route_data, feasibility_report)
+            route_plan = self._generate_three_location_route_plan_with_status(
+                trip, 
+                deadhead_route, 
+                loaded_route, 
+                feasibility_report,
+                driver_status
+            )
 
             return {
                 'success': True,
                 'feasibility': feasibility_report,
                 'route_plan': route_plan,
-                'route_data': route_data
+                'route_data': combined_route_data,
+                'leg_details': {
+                    'deadhead': deadhead_route,
+                    'loaded': loaded_route
+                },
+                'current_status_considered': has_cycle_data
             }
             
         except Exception as e:
@@ -95,6 +151,536 @@ class RoutePlannerService:
                 'error': 'Failed to calculate trip feasibility',
                 'details': str(e)
             }
+    
+    def _combine_route_legs(self, deadhead_route: Dict, loaded_route: Dict) -> Dict:
+        """
+        Combine deadhead and loaded route data into a single route representation
+        """
+        return {
+            'success': True,
+            'provider': 'openrouteservice',
+            'route_id': f"combined_{deadhead_route.get('route_id', '')}_{loaded_route.get('route_id', '')}",
+            
+            # Combined totals
+            'distance_meters': deadhead_route['distance_meters'] + loaded_route['distance_meters'],
+            'distance_miles': deadhead_route['distance_miles'] + loaded_route['distance_miles'],
+            'duration_seconds': deadhead_route['duration_seconds'] + loaded_route['duration_seconds'],
+            'duration_hours': deadhead_route['duration_hours'] + loaded_route['duration_hours'],
+            
+            # Route structure
+            'legs': [
+                {
+                    'leg_type': 'deadhead',
+                    'origin_lat': deadhead_route['origin_lat'],
+                    'origin_lng': deadhead_route['origin_lng'],
+                    'destination_lat': deadhead_route['destination_lat'],
+                    'destination_lng': deadhead_route['destination_lng'],
+                    'distance_miles': deadhead_route['distance_miles'],
+                    'duration_hours': deadhead_route['duration_hours'],
+                    'geometry': deadhead_route['geometry'],
+                    'instructions': deadhead_route['instructions'],
+                    'waypoints': deadhead_route['waypoints'],
+                },
+                {
+                    'leg_type': 'loaded',
+                    'origin_lat': loaded_route['origin_lat'],
+                    'origin_lng': loaded_route['origin_lng'],
+                    'destination_lat': loaded_route['destination_lat'],
+                    'destination_lng': loaded_route['destination_lng'],
+                    'distance_miles': loaded_route['distance_miles'],
+                    'duration_hours': loaded_route['duration_hours'],
+                    'geometry': loaded_route['geometry'],
+                    'instructions': loaded_route['instructions'],
+                    'waypoints': loaded_route['waypoints'],
+                }
+            ],
+            
+            # Combined geometry (would need processing for real map display)
+            'combined_geometry': {
+                'type': 'combined_polylines',
+                'deadhead_polyline': deadhead_route['geometry'],
+                'loaded_polyline': loaded_route['geometry']
+            }
+        }
+    
+    def _generate_three_location_route_plan_with_status(
+            self, 
+            trip: Trip, 
+            deadhead_route: Dict, 
+            loaded_route: Dict, 
+            feasibility_report: Dict,
+            driver_status: 'DriverCycleStatus' = None
+        ) -> Dict[str, any]:
+        """
+        Generate detailed route plan for three-location trip structure
+        """
+        route_plan = {
+            'stops': [],
+            'hos_periods': [],
+            'total_duration_hours': 0,
+            'estimated_pickup_time': None,
+            'estimated_arrival': None,
+            'optimization_notes': [],
+            'current_status_impact': {}
+        }
+
+        current_time = trip.departure_datetime
+        current_distance = Decimal('0')
+        stop_sequence = 1
+
+        if driver_status:
+            route_plan['current_status_impact'] = {
+                'cycle_hours_used': driver_status.total_cycle_hours,
+                'remaining_cycle_hours': driver_status.remaining_cycle_hours,
+                'today_driving_hours': driver_status.today_driving_hours,
+                'remaining_driving_today': driver_status.remaining_driving_hours_today,
+                'today_on_duty_hours': driver_status.today_on_duty_hours,
+                'remaining_on_duty_today': driver_status,
+                'remaining_on_duty_today': driver_status.remaining_on_duty_hours_today,
+                'current_duty_status': driver_status.current_duty_status,
+                'needs_immediate_break': driver_status.needs_immediate_break,
+                'needs_daily_reset': driver_status.needs_daily_reset,
+                'needs_cycle_reset': driver_status.needs_cycle_reset,
+                'compliance_warnings': driver_status.compliance_warnings
+            }
+
+            # Check if driver needs immediate break after starting
+            if driver_status.needs_immediate_break:
+                route_plan['optimization_notes'].append(
+                    "CRITICAL: Driver must take 30-minute break immediately before starting trip"
+                )
+
+                # Insert mandatory break at current location
+                immediate_break_stop = {
+                    'type': 'mandatory_break',
+                    'address': trip.current_address,
+                    'latitude': float(trip.current_latitude),
+                    'longitude': float(trip.current_longitude),
+                    'arrival_time': current_time,
+                    'duration_minutes': 30,
+                    'distance_from_origin': 0,
+                    'sequence_order': stop_sequence,
+                    'leg_type': 'pre_trip',
+                    'is_required_for_compliance': True,
+                    'break_reason': 'Mandatory break - already driving 8+ hours'
+                }
+                immediate_break_stop['departure_time'] = current_time + timedelta(minutes=30)
+
+                route_plan['stops'].append(immediate_break_stop)
+
+                # Add break HOS period
+                route_plan['hos_periods'].append({
+                    'duty_status': 'off_duty',
+                    'start_datetime': current_time,
+                    'end_datetime': immediate_break_stop['departure_time'],
+                    'duration_minutes': 30,
+                    'start_location': trip.current_address,
+                    'end_location': trip.current_address,
+                    'leg_type': 'pre_trip'
+                })
+                
+                current_time = immediate_break_stop['departure_time']
+                stop_sequence += 1
+            
+            # Check if trip will exceed daily limits
+            total_estimated_hours = (deadhead_route['duration_hours'] + 
+                                    loaded_route['duration_hours'] + 
+                                    (trip.pickup_duration_minutes + trip.delivery_duration_minutes) / 60)
+            
+            if (driver_status.today_on_duty_hours + total_estimated_hours) > 14:
+                route_plan['optimization_notes'].append(
+                    f"WARNING: Trip will exceed 14-hour on-duty limit. Need daily reset after {driver_status.remaining_on_duty_hours_today:.1f} more hours"
+                )
+            
+            if (driver_status.today_driving_hours + deadhead_route['duration_hours'] + loaded_route['duration_hours']) > 11:
+                route_plan['optimization_notes'].append(
+                    f"WARNING: Trip will exceed 11-hour driving limit. Need to split trip or take daily reset"
+                )
+        
+
+        # STOP 1: Trip Start (Current Location)
+        trip_start_stop = {
+            'type': 'trip_start',
+            'address': trip.current_address,
+            'latitude': float(trip.current_latitude),
+            'longitude': float(trip.current_longitude),
+            'arrival_time': current_time,
+            'departure_time': current_time,
+            'duration_minutes': 0,
+            'distance_from_origin': 0,
+            'sequence_order': stop_sequence,
+            'leg_type': 'deadhead'
+        }
+        route_plan['stops'].append(trip_start_stop)
+        stop_sequence += 1
+
+        # DEADHEAD LEG: Current Location → Pickup Location
+        
+        # Add deadhead fuel stops and breaks if needed
+        deadhead_stops = self._calculate_leg_stops_with_status(
+            trip, 
+            deadhead_route, 
+            'deadhead',
+            start_sequence=stop_sequence,
+            start_distance=current_distance,
+            driver_status=driver_status,
+            accumulated_driving_today=driver_status.today_driving_hours if driver_status else 0
+        )
+        
+        # Add deadhead driving periods and stops
+        deadhead_periods, deadhead_end_time = self._generate_leg_periods(
+            trip,
+            deadhead_route,
+            current_time,
+            trip.current_address,
+            trip.pickup_address,
+            deadhead_stops,
+            'deadhead'
+        )
+        
+        route_plan['stops'].extend(deadhead_stops)
+        route_plan['hos_periods'].extend(deadhead_periods)
+        current_time = deadhead_end_time
+        current_distance += Decimal(str(deadhead_route['distance_miles']))
+        stop_sequence += len(deadhead_stops)
+
+
+        # STOP 2: Pickup Location
+        pickup_stop = {
+            'type': 'pickup',
+            'address': trip.pickup_address,
+            'latitude': float(trip.pickup_latitude),
+            'longitude': float(trip.pickup_longitude),
+            'arrival_time': current_time,
+            'duration_minutes': trip.pickup_duration_minutes,
+            'distance_from_origin': float(current_distance),
+            'sequence_order': stop_sequence,
+            'leg_type': 'transition'
+        }
+        pickup_stop['departure_time'] = current_time + timedelta(minutes=trip.pickup_duration_minutes)
+        route_plan['stops'].append(pickup_stop)
+        
+        # Add pickup HOS period
+        pickup_period = {
+            'duty_status': 'on_duty_not_driving',
+            'start_datetime': current_time,
+            'end_datetime': pickup_stop['departure_time'],
+            'duration_minutes': trip.pickup_duration_minutes,
+            'start_location': trip.pickup_address,
+            'end_location': trip.pickup_address,
+            'leg_type': 'pickup'
+        }
+        route_plan['hos_periods'].append(pickup_period)
+        
+        current_time = pickup_stop['departure_time']
+        route_plan['estimated_pickup_time'] = current_time
+        stop_sequence += 1
+
+        # LOADED LEG: Pickup Location → Delivery Location
+
+        # Calculate loaded stops considering accumulated driving time
+        current_driving_today = (driver_status.today_driving_hours + deadhead_route['duration_hours']) if driver_status else deadhead_route['duration_hours']
+
+        
+        # Add loaded leg fuel stops and breaks if needed
+        loaded_stops = self._calculate_leg_stops_with_status(
+            trip, 
+            loaded_route, 
+            'loaded',
+            start_sequence=stop_sequence,
+            start_distance=current_distance,
+            driver_status=driver_status,
+            accumulated_driving_today=current_driving_today
+        )
+        
+        # Add loaded driving periods and stops
+        loaded_periods, loaded_end_time = self._generate_leg_periods(
+            trip,
+            loaded_route,
+            current_time,
+            trip.pickup_address,
+            trip.delivery_address,
+            loaded_stops,
+            'loaded'
+        )
+        
+        route_plan['stops'].extend(loaded_stops)
+        route_plan['hos_periods'].extend(loaded_periods)
+        current_time = loaded_end_time
+        current_distance += Decimal(str(loaded_route['distance_miles']))
+        stop_sequence += len(loaded_stops)
+
+        # === STOP 3: Delivery Location ===
+        delivery_stop = {
+           'type': 'delivery',
+           'address': trip.delivery_address,
+           'latitude': float(trip.delivery_latitude),
+           'longitude': float(trip.delivery_longitude),
+           'arrival_time': current_time,
+           'duration_minutes': trip.delivery_duration_minutes,
+           'distance_from_origin': float(current_distance),
+           'sequence_order': stop_sequence,
+           'leg_type': 'delivery'
+        }
+        delivery_stop['departure_time'] = current_time + timedelta(minutes=trip.delivery_duration_minutes)
+
+        route_plan['stops'].append(delivery_stop)
+
+        # Add delivery HOS period
+        delivery_period = {
+           'duty_status': 'on_duty_not_driving',
+           'start_datetime': current_time,
+           'end_datetime': delivery_stop['departure_time'],
+           'duration_minutes': trip.delivery_duration_minutes,
+           'start_location': trip.delivery_address,
+           'end_location': trip.delivery_address,
+           'leg_type': 'delivery'
+        }
+        route_plan['hos_periods'].append(delivery_period)
+
+       # Calculate final totals
+        final_end_time = delivery_stop['departure_time']
+        total_trip_time = final_end_time - trip.departure_datetime
+        route_plan['total_duration_hours'] = total_trip_time.total_seconds() / 3600
+        route_plan['estimated_arrival'] = final_end_time
+
+        return route_plan
+    
+
+    def _calculate_leg_stops_with_status(
+        self, 
+        trip: Trip, 
+        leg_route: Dict, 
+        leg_type: str,
+        start_sequence: int,
+        start_distance: Decimal,
+        driver_status: 'DriverCycleStatus' = None,
+        accumulated_driving_today: float = 0
+    ) -> List[Dict]:
+        """
+        Enhanced stop calculation that considers driver's current HOS status
+        """
+        leg_stops = []
+        leg_distance = Decimal(str(leg_route['distance_miles']))
+        leg_driving_hours = leg_route['duration_hours']
+        max_fuel_distance = trip.max_fuel_distance_miles or self.max_fuel_distance_default
+        
+        current_leg_distance = Decimal('0')
+        fuel_stop_number = 1
+        
+        while current_leg_distance + max_fuel_distance < leg_distance:
+            fuel_distance = current_leg_distance + max_fuel_distance
+            absolute_distance = start_distance + fuel_distance
+            
+            leg_proportion = float(fuel_distance / leg_distance)
+            fuel_location = self._interpolate_leg_location(leg_route, leg_proportion)
+            
+            leg_stops.append({
+                'type': 'fuel',
+                'address': fuel_location['address'],
+                'latitude': fuel_location['latitude'],
+                'longitude': fuel_location['longitude'],
+                'duration_minutes': self.fuel_stop_duration_minutes,
+                'distance_from_origin': float(absolute_distance),
+                'sequence_order': start_sequence + len(leg_stops),
+                'fuel_stop_number': fuel_stop_number,
+                'leg_type': leg_type,
+                'is_required_for_compliance': False
+            })
+            
+            current_leg_distance = fuel_distance
+            fuel_stop_number += 1
+        
+        # Enhanced break calculation considering current status
+        if driver_status:
+            # Check if 30-min break is needed during this leg
+            total_driving_after_leg = accumulated_driving_today + leg_driving_hours
+            hours_since_last_break = driver_status.hours_since_last_break if driver_status.continuous_driving_since else 0
+            combined_continuous_driving = hours_since_last_break + leg_driving_hours
+            
+            # Break after 8 hours of continuous driving
+            if combined_continuous_driving > 8:
+                hours_until_break_needed = max(0, 8 - hours_since_last_break)
+                
+                if hours_until_break_needed < leg_driving_hours:
+                    # Break needed during this leg
+                    break_proportion = hours_until_break_needed / leg_driving_hours
+                    break_distance = start_distance + (leg_distance * Decimal(str(break_proportion)))
+                    break_location = self._interpolate_leg_location(leg_route, break_proportion)
+                    
+                    leg_stops.append({
+                        'type': 'mandatory_break',
+                        'address': break_location['address'],
+                        'latitude': break_location['latitude'],
+                        'longitude': break_location['longitude'],
+                        'duration_minutes': self.mandatory_break_duration_minutes,
+                        'distance_from_origin': float(break_distance),
+                        'sequence_order': start_sequence + len(leg_stops),
+                        'leg_type': leg_type,
+                        'is_required_for_compliance': True,
+                        'break_reason': f'HOS 30-minute break requirement (continuous driving: {combined_continuous_driving:.1f} hours)'
+                    })
+            
+            # Check if daily reset will be needed
+            total_on_duty_after_leg = driver_status.today_on_duty_hours + leg_driving_hours + (trip.pickup_duration_minutes + trip.delivery_duration_minutes) / 60
+            
+            if total_on_duty_after_leg > 14:
+                reset_proportion = 0.8
+                reset_distance = start_distance + (leg_distance * Decimal(str(reset_proportion)))
+                reset_location = self._interpolate_leg_location(leg_route, reset_proportion)
+                
+                leg_stops.append({
+                    'type': 'daily_reset',
+                    'address': reset_location['address'],
+                    'latitude': reset_location['latitude'],
+                    'longitude': reset_location['longitude'],
+                    'duration_minutes': 10 * 60,
+                    'distance_from_origin': float(reset_distance),
+                    'sequence_order': start_sequence + len(leg_stops),
+                    'leg_type': leg_type,
+                    'is_required_for_compliance': True,
+                    'break_reason': f'HOS 10-hour daily reset requirement (total on-duty: {total_on_duty_after_leg:.1f} hours)'
+                })
+        
+        else:
+            if leg_driving_hours > 8:
+                break_distance = start_distance + (leg_distance * Decimal('0.6'))
+                break_proportion = 0.6
+                break_location = self._interpolate_leg_location(leg_route, break_proportion)
+                
+                leg_stops.append({
+                    'type': 'mandatory_break',
+                    'address': break_location['address'],
+                    'latitude': break_location['latitude'],
+                    'longitude': break_location['longitude'],
+                    'duration_minutes': self.mandatory_break_duration_minutes,
+                    'distance_from_origin': float(break_distance),
+                    'sequence_order': start_sequence + len(leg_stops),
+                    'leg_type': leg_type,
+                    'is_required_for_compliance': True,
+                    'break_reason': 'HOS 30-minute break requirement (basic calculation)'
+                })
+        
+        leg_stops.sort(key=lambda x: x['distance_from_origin'])
+        for i, stop in enumerate(leg_stops):
+            stop['sequence_order'] = start_sequence + i
+        
+        return leg_stops
+   
+    def _interpolate_leg_location(self, leg_route: Dict, proportion: float) -> Dict:
+        """
+        Interpolate location along a specific leg route
+        """
+        origin_lat = leg_route['origin_lat']
+        origin_lng = leg_route['origin_lng']
+        dest_lat = leg_route['destination_lat']
+        dest_lng = leg_route['destination_lng']
+        
+        # Linear interpolation
+        interpolated_lat = origin_lat + (dest_lat - origin_lat) * proportion
+        interpolated_lng = origin_lng + (dest_lng - origin_lng) * proportion
+        
+        # Try to use waypoints for more accuracy if available
+        waypoints = leg_route.get('waypoints', [])
+        if waypoints and len(waypoints) > 2:
+            interpolated_location = self._interpolate_from_waypoints(waypoints, proportion)
+            if interpolated_location:
+                interpolated_lat = interpolated_location['latitude']
+                interpolated_lng = interpolated_location['longitude']
+        
+        distance_miles = int(leg_route['distance_miles'] * proportion)
+        return {
+            'address': f"Highway Location (Mile {distance_miles})",
+            'latitude': interpolated_lat,
+            'longitude': interpolated_lng
+        }
+    
+    def _generate_leg_periods(
+        self,
+        trip: Trip,
+        leg_route: Dict,
+        start_time: datetime,
+        start_location: str,
+        end_location: str,
+        leg_stops: List[Dict],
+        leg_type: str
+    ) -> Tuple[List[Dict], datetime]:
+        """
+        Generate HOS periods for a specific leg including driving and stops
+        """
+        periods = []
+        current_time = start_time
+        leg_distance = Decimal(str(leg_route['distance_miles']))
+        current_distance = Decimal('0')
+        
+        # Sort stops by distance for this leg
+        sorted_stops = sorted(leg_stops, key=lambda x: x['distance_from_origin'])
+        
+        for stop in sorted_stops:
+            # Calculate driving distance to this stop
+            stop_distance_in_leg = stop['distance_from_origin'] - current_distance
+            if stop_distance_in_leg > 0:
+                # Calculate driving time to this stop
+                proportion_to_stop = float(stop_distance_in_leg / leg_distance)
+                driving_time_hours = leg_route['duration_hours'] * proportion_to_stop
+                driving_time_minutes = int(driving_time_hours * 60)
+                
+                if driving_time_minutes > 0:
+                    # Add driving period to this stop
+                    driving_end_time = current_time + timedelta(minutes=driving_time_minutes)
+                    periods.append({
+                        'duty_status': 'driving',
+                        'start_datetime': current_time,
+                        'end_datetime': driving_end_time,
+                        'duration_minutes': driving_time_minutes,
+                        'distance_traveled_miles': float(stop_distance_in_leg),
+                        'start_location': start_location if current_distance == 0 else 'Highway',
+                        'end_location': stop['address'],
+                        'leg_type': leg_type
+                    })
+                    
+                    current_time = driving_end_time
+                    current_distance = Decimal(str(stop['distance_from_origin']))
+            
+            # Add stop period
+            stop_end_time = current_time + timedelta(minutes=stop['duration_minutes'])
+            stop_duty_status = self._get_stop_duty_status(stop['type'])
+            
+            periods.append({
+                'duty_status': stop_duty_status,
+                'start_datetime': current_time,
+                'end_datetime': stop_end_time,
+                'duration_minutes': stop['duration_minutes'],
+                'start_location': stop['address'],
+                'end_location': stop['address'],
+                'leg_type': leg_type
+            })
+            
+            current_time = stop_end_time
+        
+        # Add final driving period to end of leg
+        remaining_distance = leg_distance - current_distance
+        if remaining_distance > 0:
+            proportion_remaining = float(remaining_distance / leg_distance)
+            final_driving_hours = leg_route['duration_hours'] * proportion_remaining
+            final_driving_minutes = int(final_driving_hours * 60)
+            
+            if final_driving_minutes > 0:
+                final_driving_end = current_time + timedelta(minutes=final_driving_minutes)
+                periods.append({
+                    'duty_status': 'driving',
+                    'start_datetime': current_time,
+                    'end_datetime': final_driving_end,
+                    'duration_minutes': final_driving_minutes,
+                    'distance_traveled_miles': float(remaining_distance),
+                    'start_location': 'Highway' if leg_stops else start_location,
+                    'end_location': end_location,
+                    'leg_type': leg_type
+                })
+                current_time = final_driving_end
+        
+        return periods, current_time
+
     
     def _generate_route_plan(self, trip: Trip, route_data: Dict, feasibility_report: Dict) -> Dict[str,any]:
         """

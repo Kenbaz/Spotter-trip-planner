@@ -8,6 +8,7 @@ from django.core.cache import cache, caches
 import hashlib
 import json
 from ..models import Trip, HOSPeriod, ComplianceReport
+from users.models import DriverCycleStatus
 
 
 class HOSCalculatorService:
@@ -295,6 +296,51 @@ class HOSCalculatorService:
             cache.set(cache_key, feasibility_report, timeout=1800)
 
         return feasibility_report
+    
+    def validate_trip_feasibility_with_current_status(self, trip: Trip, estimated_driving_hours: Decimal, driver_status: 'DriverCycleStatus') -> Dict[str, any]:
+        base_feasibility = self.validate_trip_feasibility(trip, estimated_driving_hours)
+        enhanced_feasibility = base_feasibility.copy()
+
+        # Convert to Decimal for consistent calculations
+        remaining_driving_today = Decimal(str(self.max_driving_hours)) - Decimal(str(driver_status.today_driving_hours))
+        remaining_cycle_hours = Decimal('70') - Decimal(str(driver_status.total_cycle_hours))
+
+        if estimated_driving_hours > remaining_driving_today:
+            enhanced_feasibility['violations'].append({
+                'type': 'insufficient_daily_driving_hours',
+                'required': float(estimated_driving_hours),
+                'available': float(remaining_driving_today),
+                'shortfall': float(estimated_driving_hours - remaining_driving_today)
+            })
+            enhanced_feasibility['is_feasible'] = False
+        
+        if estimated_driving_hours > remaining_cycle_hours:
+            enhanced_feasibility['violations'].append({
+                'type': 'insufficient_cycle_hours',
+                'required': float(estimated_driving_hours),
+                'available': float(remaining_cycle_hours),
+                'shortfall': float(estimated_driving_hours - remaining_cycle_hours)
+            })
+            enhanced_feasibility['is_feasible'] = False
+        
+        if driver_status.needs_immediate_break:
+            enhanced_feasibility['required_breaks'].insert(0, {
+                'type': 'immediate_mandatory_break',
+                'duration_minutes': 30,
+                'before_trip_start': True,
+                'reason': f'Driver has been driving for {driver_status.hours_since_last_break:.1f} hours'
+            })
+
+        enhanced_feasibility['current_status_impact'] = {
+            'today_driving_hours_used': driver_status.today_driving_hours,
+            'remaining_driving_hours_today': float(remaining_driving_today),
+            'cycle_hours_used': driver_status.total_cycle_hours,
+            'remaining_cycle_hours': float(remaining_cycle_hours),
+            'needs_immediate_break': driver_status.needs_immediate_break,
+            'current_duty_status': driver_status.current_duty_status
+        }
+
+        return enhanced_feasibility
     
     def generate_compliance_report(self, trip: Trip) -> ComplianceReport:
         """

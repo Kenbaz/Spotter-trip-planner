@@ -1,9 +1,10 @@
 # users/serializers.py
 
 from rest_framework import serializers
-from .models import SpotterCompany, Vehicle, DriverVehicleAssignment
+from .models import SpotterCompany, Vehicle, DriverVehicleAssignment, DriverCycleStatus
 from django.contrib.auth import get_user_model
 from django.contrib.auth.password_validation import validate_password
+from django.utils import timezone
 
 User = get_user_model()
 
@@ -304,3 +305,99 @@ class VehicleSummarySerializer(serializers.ModelSerializer):
                 'username': assignment.driver.username
             }
         return None
+
+
+class DriverCycleStatusSerializer(serializers.ModelSerializer):
+    """
+    Serializer for DriverCycleStatus model
+    """
+    
+    # Read-only computed fields
+    remaining_cycle_hours = serializers.ReadOnlyField()
+    remaining_driving_hours_today = serializers.ReadOnlyField()
+    remaining_on_duty_hours_today = serializers.ReadOnlyField()
+    hours_since_last_break = serializers.ReadOnlyField()
+    needs_immediate_break = serializers.ReadOnlyField()
+    needs_daily_reset = serializers.ReadOnlyField()
+    needs_cycle_reset = serializers.ReadOnlyField()
+    compliance_warnings = serializers.ReadOnlyField()
+    hours_until_break_required = serializers.ReadOnlyField()
+    hours_until_daily_reset_required = serializers.ReadOnlyField()
+    
+    class Meta:
+        model = DriverCycleStatus
+        fields = [
+            # Basic fields
+            'driver', 'cycle_start_date', 'total_cycle_hours',
+            'today_date', 'today_driving_hours', 'today_on_duty_hours',
+            'current_duty_status', 'current_status_start',
+            'continuous_driving_since', 'last_30min_break_end',
+            'last_daily_reset_start', 'last_daily_reset_end',
+            
+            # Computed read-only fields
+            'remaining_cycle_hours', 'remaining_driving_hours_today',
+            'remaining_on_duty_hours_today', 'hours_since_last_break',
+            'needs_immediate_break', 'needs_daily_reset', 'needs_cycle_reset',
+            'compliance_warnings', 'hours_until_break_required',
+            'hours_until_daily_reset_required',
+            
+            # Timestamps
+            'updated_at'
+        ]
+        read_only_fields = [
+            'remaining_cycle_hours', 'remaining_driving_hours_today',
+            'remaining_on_duty_hours_today', 'hours_since_last_break',
+            'needs_immediate_break', 'needs_daily_reset', 'needs_cycle_reset',
+            'compliance_warnings', 'hours_until_break_required',
+            'hours_until_daily_reset_required', 'updated_at'
+        ]
+    
+    def validate_total_cycle_hours(self, value):
+        """Validate total cycle hours are within acceptable range"""
+        if value < 0:
+            raise serializers.ValidationError("Total cycle hours cannot be negative")
+        if value > 70:
+            raise serializers.ValidationError("Total cycle hours cannot exceed 70 hours")
+        return value
+    
+    def validate_today_driving_hours(self, value):
+        """Validate today's driving hours"""
+        if value < 0:
+            raise serializers.ValidationError("Today's driving hours cannot be negative")
+        if value > 11:
+            raise serializers.ValidationError("Today's driving hours cannot exceed 11 hours")
+        return value
+    
+    def validate_today_on_duty_hours(self, value):
+        """Validate today's on-duty hours"""
+        if value < 0:
+            raise serializers.ValidationError("Today's on-duty hours cannot be negative")
+        if value > 14:
+            raise serializers.ValidationError("Today's on-duty hours cannot exceed 14 hours")
+        return value
+    
+    def validate_current_status_start(self, value):
+        """Validate current status start time"""
+        if value > timezone.now():
+            raise serializers.ValidationError("Current status start time cannot be in the future")
+        return value
+    
+    def validate(self, attrs):
+        """Cross-field validation"""
+        today_driving = attrs.get('today_driving_hours', 0)
+        today_on_duty = attrs.get('today_on_duty_hours', 0)
+        total_cycle = attrs.get('total_cycle_hours', 0)
+        
+        # Driving hours can't exceed on-duty hours
+        if today_driving > today_on_duty:
+            raise serializers.ValidationError(
+                "Today's driving hours cannot exceed today's on-duty hours"
+            )
+        
+        # Today's hours should contribute to cycle hours  
+        if today_on_duty > total_cycle:
+            raise serializers.ValidationError(
+                "Today's on-duty hours cannot exceed total cycle hours"
+            )
+        
+        return attrs

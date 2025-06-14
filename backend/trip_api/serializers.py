@@ -3,32 +3,71 @@
 from rest_framework import serializers
 from decimal import Decimal
 from django.utils import timezone
+from datetime import timedelta
 from django.contrib.auth import get_user_model
 from .models import Trip, Route, Stops, HOSPeriod, ComplianceReport
-from users.models import DriverVehicleAssignment, Vehicle
+from users.models import DriverVehicleAssignment, Vehicle, DriverCycleStatus
+from users.serializers import DriverCycleStatusSerializer
+
 
 User = get_user_model()
 
 
 class TripCreationSerializer(serializers.ModelSerializer):
     """
-    Serializer for creating new trips with input validation.
-    Driver and company are automatically set based on authenticated user.
+    Enhanced serializer for creating new trips with current driver cycle status.
+    Includes all location data, timing, and current HOS status for compliance planning.
     """
+    
+    # Current cycle information
+    current_cycle_hours_used = serializers.FloatField(
+        min_value=0,
+        max_value=70,
+        help_text="Hours already used in current 8-day cycle (0-70)"
+    )
+    hours_driven_today = serializers.FloatField(
+        min_value=0,
+        max_value=11,
+        help_text="Hours already driven today (0-11)"
+    )
+    hours_on_duty_today = serializers.FloatField(
+        min_value=0,
+        max_value=14,
+        help_text="Hours already on duty today (0-14)"
+    )
+    current_duty_status = serializers.ChoiceField(
+        choices=[
+            ('off_duty', 'Off Duty'),
+            ('sleeper_berth', 'Sleeper Berth'),
+            ('driving', 'Driving'),
+            ('on_duty_not_driving', 'On Duty (Not Driving)'),
+        ],
+        help_text="What is the driver doing right now?"
+    )
+    current_status_start_time = serializers.DateTimeField(
+        help_text="When did current duty status start?"
+    )
+    last_break_end_time = serializers.DateTimeField(
+        required=False,
+        allow_null=True,
+        help_text="When did last 30-minute break end? (optional)"
+    )
     
     class Meta:
         model = Trip
         fields = [
-            'current_address',
-            'current_latitude',
-            'current_longitude',
-            'destination_address',
-            'destination_latitude',
-            'destination_longitude',
-            'departure_datetime',
+            # Trip locations
+            'current_address', 'current_latitude', 'current_longitude',
+            'pickup_address', 'pickup_latitude', 'pickup_longitude',
+            'delivery_address', 'delivery_latitude', 'delivery_longitude',
+            
+            # Trip timing and settings
+            'departure_datetime', 'pickup_duration_minutes', 'delivery_duration_minutes',
             'max_fuel_distance_miles',
-            'pickup_duration_minutes',
-            'delivery_duration_minutes'
+            
+            # Current cycle status
+            'current_cycle_hours_used', 'hours_driven_today', 'hours_on_duty_today',
+            'current_duty_status', 'current_status_start_time', 'last_break_end_time'
         ]
     
     def validate_departure_datetime(self, value):
@@ -49,44 +88,141 @@ class TripCreationSerializer(serializers.ModelSerializer):
             raise serializers.ValidationError("Longitude must be between -180 and 180")
         return value
     
-    def validate_destination_latitude(self, value):
-        """Validate destination latitude range"""
+    def validate_pickup_latitude(self, value):
+        """Validate pickup latitude range"""
         if not -90 <= value <= 90:
-            raise serializers.ValidationError("Destination latitude must be between -90 and 90")
+            raise serializers.ValidationError("Pickup latitude must be between -90 and 90")
         return value
     
-    def validate_destination_longitude(self, value):
-        """Validate destination longitude range"""
+    def validate_pickup_longitude(self, value):
+        """Validate pickup longitude range"""
         if not -180 <= value <= 180:
-            raise serializers.ValidationError("Destination longitude must be between -180 and 180")
+            raise serializers.ValidationError("Pickup longitude must be between -180 and 180")
+        return value
+    
+    def validate_delivery_latitude(self, value):
+        """Validate delivery latitude range"""
+        if not -90 <= value <= 90:
+            raise serializers.ValidationError("Delivery latitude must be between -90 and 90")
+        return value
+    
+    def validate_delivery_longitude(self, value):
+        """Validate delivery longitude range"""
+        if not -180 <= value <= 180:
+            raise serializers.ValidationError("Delivery longitude must be between -180 and 180")
         return value
     
     def validate(self, attrs):
         """Cross-field validation"""
-        # Check if origin and destination are different
-        origin_lat = attrs['current_latitude']
-        origin_lng = attrs['current_longitude']
-        dest_lat = attrs['destination_latitude']
-        dest_lng = attrs['destination_longitude']
+        # Check if all three locations are different
+        current_lat = attrs['current_latitude']
+        current_lng = attrs['current_longitude']
+        pickup_lat = attrs['pickup_latitude']
+        pickup_lng = attrs['pickup_longitude']
+        delivery_lat = attrs['delivery_latitude']
+        delivery_lng = attrs['delivery_longitude']
         
-        # Calculate rough distance (simple check)
-        lat_diff = abs(float(origin_lat - dest_lat))
-        lng_diff = abs(float(origin_lng - dest_lng))
-        
-        if lat_diff < 0.01 and lng_diff < 0.01:  # Very close coordinates
+        # Check pickup vs delivery
+        if (abs(float(pickup_lat - delivery_lat)) < 0.01 and 
+            abs(float(pickup_lng - delivery_lng)) < 0.01):
             raise serializers.ValidationError(
-                "Origin and destination locations are too similar. Please ensure they are different locations."
+                "Pickup location and delivery location are too similar. Please ensure they are different locations."
             )
+        
+        # Check current vs delivery
+        if (abs(float(current_lat - delivery_lat)) < 0.01 and 
+            abs(float(current_lng - delivery_lng)) < 0.01):
+            raise serializers.ValidationError(
+                "Current location and delivery location are too similar. Please ensure they are different locations."
+            )
+        
+        # Validate cycle data consistency
+        cycle_hours = attrs['current_cycle_hours_used']
+        today_driving = attrs['hours_driven_today']
+        today_on_duty = attrs['hours_on_duty_today']
+        current_status = attrs['current_duty_status']
+        status_start = attrs['current_status_start_time']
+        
+        if today_on_duty > cycle_hours:
+            raise serializers.ValidationError(
+                "Today's on-duty hours cannot exceed total cycle hours used"
+            )
+        
+        if today_driving > today_on_duty:
+            raise serializers.ValidationError(
+                "Today's driving hours cannot exceed today's on-duty hours"
+            )
+        
+        if status_start > timezone.now():
+            raise serializers.ValidationError(
+                "Current status start time cannot be in the future"
+            )
+        
+        if current_status == 'driving':
+            hours_since_status_start = (timezone.now() - status_start).total_seconds() / 3600
+            total_driving_today = today_driving + hours_since_status_start
+            
+            if total_driving_today > 8 and not attrs.get('last_break_end_time'):
+                raise serializers.ValidationError(
+                    "Driver has been driving more than 8 hours and needs a 30-minute break before continuing"
+                )
         
         return attrs
     
     def create(self, validated_data):
-        """Create trip with user context"""
+        """Create trip and update driver cycle status"""
         request = self.context.get('request')
-        if request and request.user:
-            return super().create(validated_data)
-        else:
+        if not request or not request.user:
             raise serializers.ValidationError("Authentication required to create trips")
+        
+        cycle_data = {
+            'current_cycle_hours_used': validated_data.pop('current_cycle_hours_used'),
+            'hours_driven_today': validated_data.pop('hours_driven_today'),
+            'hours_on_duty_today': validated_data.pop('hours_on_duty_today'),
+            'current_duty_status': validated_data.pop('current_duty_status'),
+            'current_status_start_time': validated_data.pop('current_status_start_time'),
+            'last_break_end_time': validated_data.pop('last_break_end_time', None),
+        }
+        
+        # Create trip with remaining data
+        trip = super().create(validated_data)
+        
+        # Update or create driver cycle status
+        self._update_driver_cycle_status(trip.driver, cycle_data)
+        
+        return trip
+    
+    def _update_driver_cycle_status(self, driver, cycle_data):
+        """Update driver's current cycle status"""
+        cycle_start = timezone.now() - timedelta(days=7)
+        
+        # Calculate continuous driving start time
+        continuous_driving_since = None
+        if cycle_data['current_duty_status'] == 'driving':
+            if cycle_data['last_break_end_time']:
+                continuous_driving_since = cycle_data['last_break_end_time']
+            else:
+                continuous_driving_since = cycle_data['current_status_start_time']
+        
+        cycle_status, created = DriverCycleStatus.objects.update_or_create(
+            driver=driver,
+            defaults={
+                'cycle_start_date': cycle_start,
+                'total_cycle_hours': cycle_data['current_cycle_hours_used'],
+                'current_duty_status': cycle_data['current_duty_status'],
+                'current_status_start': cycle_data['current_status_start_time'],
+                'today_driving_hours': cycle_data['hours_driven_today'],
+                'today_on_duty_hours': cycle_data['hours_on_duty_today'],
+                'today_date': timezone.now().date(),
+                'last_30min_break_end': cycle_data['last_break_end_time'],
+                'continuous_driving_since': continuous_driving_since,
+            }
+        )
+        
+        if created:
+            print(f"Created new cycle status for {driver.full_name}")
+        else:
+            print(f"Updated cycle status for {driver.full_name}")
 
 
 class StopsSerializer(serializers.ModelSerializer):
@@ -233,11 +369,15 @@ class TripDetailSerializer(serializers.ModelSerializer):
     vehicle_info = serializers.SerializerMethodField()
     company_name = serializers.CharField(source='company.name', read_only=True)
     created_by_name = serializers.CharField(source='created_by.full_name', read_only=True)
+
+    driver_cycle_status = DriverCycleStatusSerializer(source='driver.cycle_status')
     
     # Status and compliance
     status_display = serializers.CharField(source='get_status_display', read_only=True)
     is_editable = serializers.ReadOnlyField()
     compliance_summary = serializers.ReadOnlyField()
+
+    trip_legs = serializers.ReadOnlyField()
     
     class Meta:
         model = Trip
@@ -251,23 +391,42 @@ class TripDetailSerializer(serializers.ModelSerializer):
             'status',
             'status_display',
             'is_editable',
+
             'current_address',
             'current_latitude',
             'current_longitude',
-            'destination_address',
-            'destination_latitude',
-            'destination_longitude',
+
+            'pickup_address',
+            'pickup_latitude',
+            'pickup_longitude',
+
+            'delivery_address',
+            'delivery_latitude',
+            'delivery_longitude',
+
+            'driver_cycle_status',
+
             'departure_datetime',
             'max_fuel_distance_miles',
             'pickup_duration_minutes',
             'delivery_duration_minutes',
+
             'total_distance_miles',
+            'deadhead_distance_miles',
+            'loaded_distance_miles',
             'total_driving_time',
+            'deadhead_driving_time',
+            'loaded_driving_time',
             'estimated_arrival_time',
+            'estimated_pickup_time',
             'is_hos_compliant',
             'compliance_summary',
+
+            'trip_legs',
+
             'created_at',
             'updated_at',
+
             'stops',
             'hos_periods',
             'route',
@@ -304,12 +463,20 @@ class TripListSerializer(serializers.ModelSerializer):
             'trip_id',
             'driver_name',
             'vehicle_unit',
+
             'current_address',
-            'destination_address',
+            'pickup_address', 
+            'delivery_address',
+
             'departure_datetime',
             'estimated_arrival_time',
+            'estimated_pickup_time',
+
             'total_distance_miles',
+            'deadhead_distance_miles',
+            'loaded_distance_miles',
             'total_driving_time',
+
             'status',
             'status_display',
             'is_hos_compliant',
