@@ -416,7 +416,7 @@ class DriverCycleStatus(models.Model):
         help_text="Hours on-duty TODAY (out of 14 allowed)"
     )
     today_date = models.DateField(
-        auto_now_add=True,
+        default=timezone.now,
         help_text="Date these daily totals apply to"
     )
 

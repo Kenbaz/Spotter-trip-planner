@@ -234,107 +234,107 @@ class DriverVehicleAssignmentAdmin(admin.ModelAdmin):
         return qs
 
 
-@admin.register(DriverCycleStatus)
-class DriverCycleStatusAdmin(admin.ModelAdmin):
-    list_display = (
-        'driver', 'total_cycle_hours', 'remaining_cycle_hours',
-        'today_driving_hours', 'today_on_duty_hours', 'current_duty_status',
-        'needs_immediate_break_display', 'needs_daily_reset_display', 'updated_at'
-    )
-    list_filter = (
-        'current_duty_status',
-        'today_date', 'updated_at'
-    )
-    search_fields = (
-        'driver__username', 'driver__first_name', 'driver__last_name'
-    )
-    readonly_fields = (
-        'today_date', 'remaining_cycle_hours', 'remaining_driving_hours_today',
-        'remaining_on_duty_hours_today', 'hours_since_last_break',
-        'needs_immediate_break_display', 'needs_daily_reset_display', 'needs_cycle_reset_display',
-        'compliance_warnings_display', 'updated_at'
-    )
+# @admin.register(DriverCycleStatus)
+# class DriverCycleStatusAdmin(admin.ModelAdmin):
+#     list_display = (
+#         'driver', 'total_cycle_hours', 'remaining_cycle_hours',
+#         'today_driving_hours', 'today_on_duty_hours', 'current_duty_status',
+#         'needs_immediate_break_display', 'needs_daily_reset_display', 'updated_at'
+#     )
+#     list_filter = (
+#         'current_duty_status',
+#         'today_date', 'updated_at'
+#     )
+#     search_fields = (
+#         'driver__username', 'driver__first_name', 'driver__last_name'
+#     )
+#     readonly_fields = (
+#         'today_date', 'remaining_cycle_hours', 'remaining_driving_hours_today',
+#         'remaining_on_duty_hours_today', 'hours_since_last_break',
+#         'needs_immediate_break_display', 'needs_daily_reset_display', 'needs_cycle_reset_display',
+#         'compliance_warnings_display', 'updated_at'
+#     )
     
-    fieldsets = (
-        ('Driver Information', {
-            'fields': ('driver',)
-        }),
-        ('Cycle Status (8-day period)', {
-            'fields': (
-                'cycle_start_date', 'total_cycle_hours', 'remaining_cycle_hours'
-            )
-        }),
-        ('Daily Status', {
-            'fields': (
-                'today_date', 'today_driving_hours', 'today_on_duty_hours',
-                'remaining_driving_hours_today', 'remaining_on_duty_hours_today'
-            )
-        }),
-        ('Current Activity', {
-            'fields': (
-                'current_duty_status', 'current_status_start',
-                'continuous_driving_since', 'last_30min_break_end'
-            )
-        }),
-        ('Daily Reset Tracking', {
-            'fields': (
-                'last_daily_reset_start', 'last_daily_reset_end'
-            )
-        }),
-        ('Compliance Status', {
-            'fields': (
-                'needs_immediate_break_display', 'needs_daily_reset_display', 'needs_cycle_reset_display',
-                'hours_since_last_break', 'compliance_warnings_display'
-            ),
-            'classes': ('collapse',)
-        }),
-        ('Timestamps', {
-            'fields': ('updated_at',),
-            'classes': ('collapse',)
-        })
-    )
+#     fieldsets = (
+#         ('Driver Information', {
+#             'fields': ('driver',)
+#         }),
+#         ('Cycle Status (8-day period)', {
+#             'fields': (
+#                 'cycle_start_date', 'total_cycle_hours', 'remaining_cycle_hours'
+#             )
+#         }),
+#         ('Daily Status', {
+#             'fields': (
+#                 'today_date', 'today_driving_hours', 'today_on_duty_hours',
+#                 'remaining_driving_hours_today', 'remaining_on_duty_hours_today'
+#             )
+#         }),
+#         ('Current Activity', {
+#             'fields': (
+#                 'current_duty_status', 'current_status_start',
+#                 'continuous_driving_since', 'last_30min_break_end'
+#             )
+#         }),
+#         ('Daily Reset Tracking', {
+#             'fields': (
+#                 'last_daily_reset_start', 'last_daily_reset_end'
+#             )
+#         }),
+#         ('Compliance Status', {
+#             'fields': (
+#                 'needs_immediate_break_display', 'needs_daily_reset_display', 'needs_cycle_reset_display',
+#                 'hours_since_last_break', 'compliance_warnings_display'
+#             ),
+#             'classes': ('collapse',)
+#         }),
+#         ('Timestamps', {
+#             'fields': ('updated_at',),
+#             'classes': ('collapse',)
+#         })
+#     )
 
-    def needs_immediate_break_display(self, obj):
-        """Display method for needs_immediate_break property"""
-        return obj.needs_immediate_break
-    needs_immediate_break_display.short_description = 'Needs Immediate Break'
-    needs_immediate_break_display.boolean = True
+#     def needs_immediate_break_display(self, obj):
+#         """Display method for needs_immediate_break property"""
+#         return obj.needs_immediate_break
+#     needs_immediate_break_display.short_description = 'Needs Immediate Break'
+#     needs_immediate_break_display.boolean = True
     
-    def needs_daily_reset_display(self, obj):
-        """Display method for needs_daily_reset property"""
-        return obj.needs_daily_reset
-    needs_daily_reset_display.short_description = 'Needs Daily Reset'
-    needs_daily_reset_display.boolean = True
+#     def needs_daily_reset_display(self, obj):
+#         """Display method for needs_daily_reset property"""
+#         return obj.needs_daily_reset
+#     needs_daily_reset_display.short_description = 'Needs Daily Reset'
+#     needs_daily_reset_display.boolean = True
     
-    def needs_cycle_reset_display(self, obj):
-        """Display method for needs_cycle_reset property"""
-        return obj.needs_cycle_reset
-    needs_cycle_reset_display.short_description = 'Needs Cycle Reset'
-    needs_cycle_reset_display.boolean = True
+#     def needs_cycle_reset_display(self, obj):
+#         """Display method for needs_cycle_reset property"""
+#         return obj.needs_cycle_reset
+#     needs_cycle_reset_display.short_description = 'Needs Cycle Reset'
+#     needs_cycle_reset_display.boolean = True
     
-    def compliance_warnings_display(self, obj):
-        """Display method for compliance_warnings property"""
-        warnings = obj.compliance_warnings
-        if not warnings:
-            return "No warnings"
-        return f"{len(warnings)} warning(s)"
-    compliance_warnings_display.short_description = 'Compliance Warnings'
+#     def compliance_warnings_display(self, obj):
+#         """Display method for compliance_warnings property"""
+#         warnings = obj.compliance_warnings
+#         if not warnings:
+#             return "No warnings"
+#         return f"{len(warnings)} warning(s)"
+#     compliance_warnings_display.short_description = 'Compliance Warnings'
 
 
-@admin.register(DailyDrivingRecord)
-class DailyDrivingRecordAdmin(admin.ModelAdmin):
-    list_display = (
-        'driver', 'date', 'total_driving_hours', 'total_on_duty_hours',
-        'had_30min_break', 'had_daily_reset', 'is_compliant'
-    )
-    list_filter = (
-        'date', 'had_30min_break', 'had_daily_reset', 'is_compliant'
-    )
-    search_fields = (
-        'driver__username', 'driver__first_name', 'driver__last_name'
-    )
-    date_hierarchy = 'date'
-    ordering = ['-date']
+# @admin.register(DailyDrivingRecord)
+# class DailyDrivingRecordAdmin(admin.ModelAdmin):
+#     list_display = (
+#         'driver', 'date', 'total_driving_hours', 'total_on_duty_hours',
+#         'had_30min_break', 'had_daily_reset', 'is_compliant'
+#     )
+#     list_filter = (
+#         'date', 'had_30min_break', 'had_daily_reset', 'is_compliant'
+#     )
+#     search_fields = (
+#         'driver__username', 'driver__first_name', 'driver__last_name'
+#     )
+#     date_hierarchy = 'date'
+#     ordering = ['-date']
 
 
 admin.site.site_header = "Spotter HOS Compliance Administration"

@@ -1,12 +1,10 @@
 # trip_api/serializers.py
 
 from rest_framework import serializers
-from decimal import Decimal
 from django.utils import timezone
-from datetime import timedelta
 from django.contrib.auth import get_user_model
 from .models import Trip, Route, Stops, HOSPeriod, ComplianceReport
-from users.models import DriverVehicleAssignment, Vehicle, DriverCycleStatus
+from users.models import DriverVehicleAssignment, DriverCycleStatus
 from users.serializers import DriverCycleStatusSerializer
 
 
@@ -20,37 +18,37 @@ class TripCreationSerializer(serializers.ModelSerializer):
     """
     
     # Current cycle information
-    current_cycle_hours_used = serializers.FloatField(
+    trip_start_cycle_hours = serializers.FloatField(
         min_value=0,
         max_value=70,
-        help_text="Hours already used in current 8-day cycle (0-70)"
+        help_text="Driver's cycle hours at trip start (for reference)"
     )
-    hours_driven_today = serializers.FloatField(
+    trip_start_driving_hours = serializers.FloatField(
         min_value=0,
         max_value=11,
-        help_text="Hours already driven today (0-11)"
+        help_text="Driver's daily driving hours at trip start (for reference)"
     )
-    hours_on_duty_today = serializers.FloatField(
+    trip_start_on_duty_hours = serializers.FloatField(
         min_value=0,
         max_value=14,
-        help_text="Hours already on duty today (0-14)"
+        help_text="Driver's daily on-duty hours at trip start (for reference)"
     )
-    current_duty_status = serializers.ChoiceField(
+    trip_start_duty_status = serializers.ChoiceField(
         choices=[
             ('off_duty', 'Off Duty'),
             ('sleeper_berth', 'Sleeper Berth'),
             ('driving', 'Driving'),
             ('on_duty_not_driving', 'On Duty (Not Driving)'),
         ],
-        help_text="What is the driver doing right now?"
+        help_text="Driver's duty status at trip start"
     )
-    current_status_start_time = serializers.DateTimeField(
-        help_text="When did current duty status start?"
+    trip_start_status_time = serializers.DateTimeField(
+        help_text="When driver started current duty status"
     )
-    last_break_end_time = serializers.DateTimeField(
+    trip_start_last_break = serializers.DateTimeField(
         required=False,
         allow_null=True,
-        help_text="When did last 30-minute break end? (optional)"
+        help_text="Driver's last 30-minute break end time (if any)"
     )
     
     class Meta:
@@ -65,9 +63,9 @@ class TripCreationSerializer(serializers.ModelSerializer):
             'departure_datetime', 'pickup_duration_minutes', 'delivery_duration_minutes',
             'max_fuel_distance_miles',
             
-            # Current cycle status
-            'current_cycle_hours_used', 'hours_driven_today', 'hours_on_duty_today',
-            'current_duty_status', 'current_status_start_time', 'last_break_end_time'
+            # Trip starting conditions
+            'trip_start_cycle_hours', 'trip_start_driving_hours', 'trip_start_on_duty_hours',
+            'trip_start_duty_status', 'trip_start_status_time', 'trip_start_last_break'
         ]
     
     def validate_departure_datetime(self, value):
@@ -137,35 +135,25 @@ class TripCreationSerializer(serializers.ModelSerializer):
             )
         
         # Validate cycle data consistency
-        cycle_hours = attrs['current_cycle_hours_used']
-        today_driving = attrs['hours_driven_today']
-        today_on_duty = attrs['hours_on_duty_today']
-        current_status = attrs['current_duty_status']
-        status_start = attrs['current_status_start_time']
+        start_cycle_hours = attrs['trip_start_cycle_hours']
+        start_driving = attrs['trip_start_driving_hours']
+        start_on_duty = attrs['trip_start_on_duty_hours']
+        start_status_time = attrs['trip_start_status_time']
         
-        if today_on_duty > cycle_hours:
+        if start_on_duty > start_cycle_hours:
             raise serializers.ValidationError(
-                "Today's on-duty hours cannot exceed total cycle hours used"
+                "Daily on-duty hours cannot exceed total cycle hours"
             )
         
-        if today_driving > today_on_duty:
+        if start_driving > start_on_duty:
             raise serializers.ValidationError(
-                "Today's driving hours cannot exceed today's on-duty hours"
+                "Daily driving hours cannot exceed daily on-duty hours"
             )
         
-        if status_start > timezone.now():
+        if start_status_time > timezone.now():
             raise serializers.ValidationError(
-                "Current status start time cannot be in the future"
+                "Status start time cannot be in the future"
             )
-        
-        if current_status == 'driving':
-            hours_since_status_start = (timezone.now() - status_start).total_seconds() / 3600
-            total_driving_today = today_driving + hours_since_status_start
-            
-            if total_driving_today > 8 and not attrs.get('last_break_end_time'):
-                raise serializers.ValidationError(
-                    "Driver has been driving more than 8 hours and needs a 30-minute break before continuing"
-                )
         
         return attrs
     
@@ -175,54 +163,93 @@ class TripCreationSerializer(serializers.ModelSerializer):
         if not request or not request.user:
             raise serializers.ValidationError("Authentication required to create trips")
         
-        cycle_data = {
-            'current_cycle_hours_used': validated_data.pop('current_cycle_hours_used'),
-            'hours_driven_today': validated_data.pop('hours_driven_today'),
-            'hours_on_duty_today': validated_data.pop('hours_on_duty_today'),
-            'current_duty_status': validated_data.pop('current_duty_status'),
-            'current_status_start_time': validated_data.pop('current_status_start_time'),
-            'last_break_end_time': validated_data.pop('last_break_end_time', None),
+        starting_conditions = {
+            'cycle_hours': validated_data.pop('trip_start_cycle_hours'),
+            'driving_hours': validated_data.pop('trip_start_driving_hours'),
+            'on_duty_hours': validated_data.pop('trip_start_on_duty_hours'),
+            'duty_status': validated_data.pop('trip_start_duty_status'),
+            'status_time': validated_data.pop('trip_start_status_time'),
+            'last_break': validated_data.pop('trip_start_last_break', None),
         }
         
         # Create trip with remaining data
         trip = super().create(validated_data)
         
         # Update or create driver cycle status
-        self._update_driver_cycle_status(trip.driver, cycle_data)
+        self._record_status_starting_conditions(trip, starting_conditions)
         
         return trip
     
-    def _update_driver_cycle_status(self, driver, cycle_data):
-        """Update driver's current cycle status"""
-        cycle_start = timezone.now() - timedelta(days=7)
-        
-        # Calculate continuous driving start time
-        continuous_driving_since = None
-        if cycle_data['current_duty_status'] == 'driving':
-            if cycle_data['last_break_end_time']:
-                continuous_driving_since = cycle_data['last_break_end_time']
-            else:
-                continuous_driving_since = cycle_data['current_status_start_time']
-        
-        cycle_status, created = DriverCycleStatus.objects.update_or_create(
-            driver=driver,
-            defaults={
-                'cycle_start_date': cycle_start,
-                'total_cycle_hours': cycle_data['current_cycle_hours_used'],
-                'current_duty_status': cycle_data['current_duty_status'],
-                'current_status_start': cycle_data['current_status_start_time'],
-                'today_driving_hours': cycle_data['hours_driven_today'],
-                'today_on_duty_hours': cycle_data['hours_on_duty_today'],
-                'today_date': timezone.now().date(),
-                'last_30min_break_end': cycle_data['last_break_end_time'],
-                'continuous_driving_since': continuous_driving_since,
-            }
-        )
-        
-        if created:
-            print(f"Created new cycle status for {driver.full_name}")
-        else:
-            print(f"Updated cycle status for {driver.full_name}")
+    def _record_trip_starting_conditions(self, trip, starting_conditions):
+        """Record the driver's HOS status at the start of the trip"""
+        # Store starting conditions on the trip model
+        trip.starting_cycle_hours = starting_conditions['cycle_hours']
+        trip.starting_driving_hours = starting_conditions['driving_hours']  
+        trip.starting_on_duty_hours = starting_conditions['on_duty_hours']
+        trip.starting_duty_status = starting_conditions['duty_status']
+        trip.save()
+
+        print(f"Recorded starting conditions for trip {trip.trip_id}")
+        print(f"  Starting cycle hours: {trip.starting_cycle_hours}")
+        print(f"  Starting driving hours: {trip.starting_driving_hours}")
+        print(f"  Starting on-duty hours: {trip.starting_on_duty_hours}")
+
+
+class CurrentDriverStatusSerializer(serializers.ModelSerializer):
+    """
+    Serializer for retrieving driver's current HOS status.
+    Used to populate trip creation forms with accurate current data.
+    """
+    remaining_cycle_hours = serializers.SerializerMethodField()
+    remaining_driving_hours_today = serializers.SerializerMethodField()
+    remaining_on_duty_hours_today = serializers.SerializerMethodField()
+    needs_immediate_break = serializers.BooleanField(read_only=True)
+    compliance_warnings = serializers.SerializerMethodField()
+
+    class Meta:
+        model = DriverCycleStatus
+        fields = [
+            'total_cycle_hours',
+            'today_driving_hours',
+            'today_on_duty_hours',
+            'current_duty_status',
+            'current_status_start',
+            'last_30min_break_end',
+            'today_date',
+
+            'remaining_cycle_hours',
+            'remaining_driving_hours_today',
+            'remaining_on_duty_hours_today',
+            'needs_immediate_break',
+            'compliance_warnings'
+        ]
+    
+    def get_remaining_cycle_hours(self, obj):
+        return obj.remaining_cycle_hours
+    
+    def get_remaining_driving_hours_today(self, obj):
+        return obj.remaining_driving_hours_today
+    
+    def get_remaining_on_duty_hours_today(self, obj):
+        return obj.remaining_on_duty_hours_today
+    
+    def get_needs_immediate_break(self, obj):
+        return obj.needs_immediate_break
+    
+    def get_compliance_warnings(self, obj):
+        return obj.compliance_warnings
+
+
+class TripCompletionSerializer(serializers.Serializer):
+    """
+    Serializer for trip completion response.
+    """
+    success = serializers.BooleanField()
+    message = serializers.CharField()
+    hours_summary = serializers.DictField()
+    
+    class Meta:
+        fields = ['success', 'message', 'hours_summary']
 
 
 class StopsSerializer(serializers.ModelSerializer):

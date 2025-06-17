@@ -1,31 +1,30 @@
 # test_api/views.py
 
-from rest_framework import viewsets, status
+from rest_framework import viewsets, status, generics, permissions
+from rest_framework.exceptions import PermissionDenied
 from rest_framework.response import Response
 from rest_framework.decorators import action
-from django.shortcuts import get_object_or_404
 from rest_framework.permissions import IsAuthenticated
 from django.utils import timezone
 from django.db import transaction
-from django.db.models import Q
 import logging
 
-from .models import Trip, Route, Stops, HOSPeriod, ComplianceReport
+from .models import Trip
 from .serializers import (
     TripCreationSerializer, TripDetailSerializer, TripListSerializer,
     TripCalculationRequestSerializer, TripCalculationResponseSerializer,
     ELDLogRequestSerializer, ELDLogResponseSerializer,
     GeocodingRequestSerializer, GeocodingResponseSerializer,
-    RouteOptimizationRequestSerializer, RouteOptimizationResponseSerializer,
-    StopsSerializer, HOSPeriodSerializer, RouteSerializer, ComplianceReportSerializer
+    RouteOptimizationRequestSerializer, RouteOptimizationResponseSerializer, ComplianceReportSerializer, TripCompletionSerializer, CurrentDriverStatusSerializer
 )
 from users.models import SpotterCompany
 from .services.route_planner import RoutePlannerService
 from .services.hos_calculator import HOSCalculatorService
 from .services.eld_generator import ELDGeneratorService
 from .services.external_apis import ExternalAPIService
+from .services import DriverCycleStatusService
 from users.permissions import IsDriverOrFleetManager, IsActiveDriver
-from users.models import DriverVehicleAssignment
+from users.models import DriverVehicleAssignment    
 
 logger = logging.getLogger(__name__)
 
@@ -83,7 +82,81 @@ class TripViewSet(viewsets.ModelViewSet):
             assigned_vehicle=current_assignement.vehicle if current_assignement else None,
         )
 
-        logger.info(f"Trip {trip.trip_id} created by driver {user.full_name}")
+        print(f"Trip {trip.trip_id} created by driver {user.full_name}")
+        print(f"  Starting conditions recorded: {trip.starting_cycle_hours}h cycle, {trip.starting_driving_hours}h driving")
+    
+    @action(detail=False, methods=['get'])
+    def current_driver_status(self, request):
+        """Get current driver's HOS status"""
+        if not request.user.is_driver:
+            return Response(
+                {'error': 'Only drivers can access HOS status'},
+                status=status.HTTP_403_FORBIDDEN
+            )
+        
+        try:
+            # Get current status which also resets daily hours if its a new day
+            status_data = DriverCycleStatusService.get_driver_status_for_trip_planning(request.user)
+
+            return Response({
+                'success': True,
+                'current_status': status_data,
+                'last_updated': timezone.now().isoformat()
+            })
+        except Exception as e:
+            print(f"Error getting driver status for {request.user.username}: {str(e)}")
+            return Response(
+                {'error': f'Failed to get driver status: {str(e)}'}, 
+                status=status.HTTP_500_INTERNAL_SERVER_ERROR
+            )
+    
+    @action(detail=True, methods=['post'])
+    def complete_trip(self, request, trip_id=None):
+        """Mark trip as completed and update driver HOS status"""
+        try:
+            trip = self.get_object()
+
+            if not self._can_modify_trip(request.user, trip):
+                return Response(
+                    {'error': 'You can only completed your own trips'},
+                    status=status.HTTP_403_FORBIDDEN
+                )
+            
+            if trip.status == 'completed':
+                return Response(
+                    {'message': 'Trip is already completed'},
+                    status=status.HTTP_400_BAD_REQUEST
+                )
+            
+            if not trip.hos_periods.exits():
+                return Response(
+                    {'error': 'Trip must have calculated route and HOS periods before completion'}, 
+                    status=status.HTTP_400_BAD_REQUEST
+                )
+            
+            with transaction.atomic():
+                trip.complet_trip()
+
+                hours_summary = trip.get_trip_hours_summary()
+
+                updated_status = DriverCycleStatusService.get_driver_status_for_trip_planning(request.user)
+
+                print(f"Trip {trip.trip_id} completed by {request.user.full_name}")
+                print(f"  Hours added: {hours_summary['driving_hours']}h driving, {hours_summary['on_duty_hours']}h on-duty")
+                
+                return Response({
+                    'success': True,
+                    'message': 'Trip completed successfully',
+                    'hours_summary': hours_summary,
+                    'updated_driver_status': updated_status
+                })
+                
+        except Exception as e:
+            logger.error(f"Error completing trip {trip_id}: {str(e)}")
+            return Response(
+                {'error': f'Failed to complete trip: {str(e)}'}, 
+                status=status.HTTP_500_INTERNAL_SERVER_ERROR
+            )
     
     def create(self, request, *args, **kwargs):
         """Create a new trip"""
@@ -253,6 +326,26 @@ class TripViewSet(viewsets.ModelViewSet):
                     status=status.HTTP_403_FORBIDDEN
                 )
             
+            # Get current driver HOS status for route planning
+            try:
+                driver_status = DriverCycleStatusService.get_or_create_current_status(request.user)
+                current_status = DriverCycleStatusService.get_driver_status_for_trip_planning(request.user)
+
+                # Check if driver can start this trip
+                estimated_hours = 14
+                can_start, reason = driver_status.can_start_trip(estimated_hours)
+
+                if not can_start:
+                    return Response({
+                        'success': False,
+                        'error': f'Cannot start trip: {reason}',
+                        'driver_status': current_status
+                    }, status=status.HTTP_400_BAD_REQUEST)
+            except Exception as e:
+                logger.warning(f"Could not get driver status for route calculation: {str(e)}")
+                driver_status = None
+                current_status = None
+            
             # Validate request data
             calc_serializer = TripCalculationRequestSerializer(data=request.data)
             calc_serializer.is_valid(raise_exception=True)
@@ -262,7 +355,7 @@ class TripViewSet(viewsets.ModelViewSet):
             route_planner = RoutePlannerService()
 
             with transaction.atomic():
-                # Calculate trip feasibility and route plan
+                # Calculate trip feasibility and route plan               
                 calc_result = route_planner.calculate_trip_feasibility(trip)
 
                 if not calc_result['success']:
@@ -322,13 +415,16 @@ class TripViewSet(viewsets.ModelViewSet):
                     'message': 'Route calculation successful',
                 }
 
+                if current_status:
+                    response_data['driver_status_impact'] = current_status
+
                 if eld_logs:
                     response_data['eld_logs'] = eld_logs
                 
                 if eld_logs:
                     response_data['eld_logs'] = eld_logs
                 
-                logger.info(f"Route calculated for trip {trip.trip_id} by driver {request.user.full_name}")
+                print(f"Route calculated for trip {trip.trip_id} by driver {request.user.full_name}")
                 
                 return Response(
                     TripCalculationResponseSerializer(response_data).data,
@@ -349,6 +445,52 @@ class TripViewSet(viewsets.ModelViewSet):
                     'optimization_applied': False,
                     'message': 'Internal server error'
                 }).data,
+                status=status.HTTP_500_INTERNAL_SERVER_ERROR
+            )
+        
+    @action(detail=False, methods=['patch'])
+    def update_driver_status(self, request):
+        """Manually update driver duty status"""
+        if not request.user.is_driver:
+            return Response(
+                {'error': 'Only drivers can update their status'}, 
+                status=status.HTTP_403_FORBIDDEN
+            )
+        
+        new_status = request.data.get('current_duty_status')
+        status_start_time = request.data.get('current_status_start')
+        
+        if not new_status:
+            return Response(
+                {'error': 'current_duty_status is required'}, 
+                status=status.HTTP_400_BAD_REQUEST
+            )
+        
+        try:
+            start_time = None
+            if status_start_time:
+                start_time = timezone.datetime.fromisoformat(status_start_time.replace('Z', '+00:00'))
+            
+            # update status
+            updated_status = DriverCycleStatusService.manual_status_update(
+                request.user, 
+                new_status, 
+                start_time
+            )
+
+            # Get formatted status for response
+            status_data = DriverCycleStatusService.get_driver_status_for_trip_planning(request.user)
+            
+            return Response({
+                'success': True,
+                'message': f'Status updated to {new_status}',
+                'current_status': status_data
+            })
+            
+        except Exception as e:
+            logger.error(f"Error updating status for {request.user.username}: {str(e)}")
+            return Response(
+                {'error': f'Failed to update status: {str(e)}'}, 
                 status=status.HTTP_500_INTERNAL_SERVER_ERROR
             )
     
@@ -587,18 +729,33 @@ class TripViewSet(viewsets.ModelViewSet):
         
         trips = trips.order_by('-created_at')
 
+        # Get current driver status for context
+        try:
+            current_status = DriverCycleStatusService.get_driver_status_for_trip_planning(request.user)
+        except Exception as e:
+            logger.warning(f"Could not get driver status: {str(e)}")
+            current_status = None
+
         # Paginate results
         page = self.paginate_queryset(trips)
         if page is not None:
             serializer = TripListSerializer(page, many=True, context={'request': request})
-            return self.get_paginated_response(serializer.data)
+            response_data = self.get_paginated_response(serializer.data).data
+            if current_status:
+                response_data['driver_status'] = current_status
+            return Response(response_data)
         
         serializer = TripListSerializer(trips, many=True, context={'request': request})
-        return Response({
+        response_data = {
             'success': True,
             'trips': serializer.data,
             'count': trips.count()
-        })
+        }
+
+        if current_status:
+            response_data['driver_status'] = current_status
+            
+        return Response(response_data)
     
     def _can_access_trip(self, user, trip):
         """Check if user can access (view) the trip"""
@@ -616,6 +773,90 @@ class TripViewSet(viewsets.ModelViewSet):
         
         return False
 
+
+class CurrentDriverStatusView(generics.RetrieveAPIView):
+    """
+    Dedicated view for getting current driver's HOS status.
+    """
+    serializer_class = CurrentDriverStatusSerializer
+    permission_classes = [permissions.IsAuthenticated]
+    
+    def get_object(self):
+        """Get current user's driver cycle status"""
+        if not self.request.user.is_driver:
+            raise PermissionDenied("Only drivers can access cycle status")
+        
+        # Reset daily hours if new day and get current status
+        cycle_status = DriverCycleStatusService.reset_daily_hours_if_needed(self.request.user)
+        return cycle_status
+    
+    def retrieve(self, request, *args, **kwargs):
+        """Override to return custom response format"""
+        instance = self.get_object()
+        serializer = self.get_serializer(instance)
+        
+        return Response({
+            'success': True,
+            'current_status': serializer.data,
+            'last_updated': timezone.now().isoformat()
+        })
+
+
+class DriverStatusUpdateView(generics.UpdateAPIView):
+    """
+    View for manually updating driver duty status.
+    Use this for status changes outside of trip completion.
+    """
+    serializer_class = CurrentDriverStatusSerializer
+    permission_classes = [permissions.IsAuthenticated]
+    
+    def get_object(self):
+        """Get current user's driver cycle status"""
+        if not self.request.user.is_driver:
+            raise PermissionDenied("Only drivers can update their status")
+        
+        return DriverCycleStatusService.get_or_create_current_status(self.request.user)
+    
+    def patch(self, request, *args, **kwargs):
+        """Update only the current duty status"""
+        cycle_status = self.get_object()
+        
+        new_status = request.data.get('current_duty_status')
+        status_start_time = request.data.get('current_status_start')
+        
+        if not new_status:
+            return Response(
+                {'error': 'current_duty_status is required'}, 
+                status=status.HTTP_400_BAD_REQUEST
+            )
+        
+        try:
+            # Parse status start time if provided
+            start_time = None
+            if status_start_time:
+                start_time = timezone.datetime.fromisoformat(status_start_time.replace('Z', '+00:00'))
+            
+            # Update status using service
+            updated_status = DriverCycleStatusService.manual_status_update(
+                self.request.user, 
+                new_status, 
+                start_time
+            )
+            
+            serializer = self.get_serializer(updated_status)
+            
+            return Response({
+                'success': True,
+                'message': f'Status updated to {new_status}',
+                'current_status': serializer.data
+            })
+            
+        except Exception as e:
+            return Response(
+                {'error': f'Failed to update status: {str(e)}'}, 
+                status=status.HTTP_500_INTERNAL_SERVER_ERROR
+            )
+        
 
 class UtilityViewSet(viewsets.ViewSet):
     """

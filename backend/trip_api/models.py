@@ -5,6 +5,8 @@ from django.contrib.auth import get_user_model
 from django.core.validators import MinValueValidator, MaxValueValidator
 from users.models import SpotterCompany, DriverVehicleAssignment
 import uuid
+from django.utils import timezone
+
 
 User = get_user_model()
 
@@ -130,6 +132,39 @@ class Trip(models.Model):
         help_text="Estimated arrival time at pickup location"
     )
 
+    starting_cycle_hours = models.FloatField(
+        null=True, blank=True,
+        help_text="Driver's cycle hours when trip started"
+    )
+    starting_driving_hours = models.FloatField(
+        null=True, blank=True,
+        help_text="Driver's daily driving hours when trip started"
+    )
+    starting_on_duty_hours = models.FloatField(
+        null=True, blank=True,
+        help_text="Driver's daily on-duty hours when trip started"
+    )
+    starting_duty_status = models.CharField(
+        max_length=20,
+        null=True, blank=True,
+        choices=[
+            ('off_duty', 'Off Duty'),
+            ('sleeper_berth', 'Sleeper Berth'),
+            ('driving', 'Driving'),
+            ('on_duty_not_driving', 'On Duty (Not Driving)'),
+        ],
+        help_text="Driver's duty status when trip started"
+    )
+
+    completed_at = models.DateTimeField(
+        null=True, blank=True,
+        help_text="When trip was completed"
+    )
+    hos_updated = models.BooleanField(
+        default=False,
+        help_text="Whether driver cycle status has been updated for this trip"
+    )
+
     is_hos_compliant = models.BooleanField(default=False)
 
     created_at = models.DateTimeField(auto_now_add=True)
@@ -155,6 +190,44 @@ class Trip(models.Model):
     def __str__(self):
         return f"Trip {self.trip_id} - {self.driver.full_name} ({self.current_address} → {self.destination_address})"
     
+    def complete_trip(self):
+        """Mark trip as completed and update driver HOS status"""
+        if self.status != 'completed':
+            self.status = 'completed'
+            self.completed_at = timezone.now()
+            self.save()
+
+            # Update driver cycle status
+            if not self.hos_updated:
+                from .services import DriverCycleStatusService
+                
+                DriverCycleStatusService.update_status_for_trip_completion(self)
+                self.hos_updated = True
+                self.save()
+    
+    def get_trip_hours_summary(self):
+        """Get summary of hours used in a trip"""
+        total_driving = 0.0
+        total_on_duty = 0.0
+
+        for period in self.hos_periods.all():
+            # conver duration_minutes to hours
+            period_duration_hours = period.duration_minutes / 60.0
+
+            if period.duty_status == 'driving':
+                total_driving += period_duration_hours
+                total_on_duty += period_duration_hours
+            elif period.duty_status == 'on_duty_not_driving':
+                total_on_duty += period_duration_hours
+        
+        return {
+            'driving_hours': total_driving,
+            'on_duty_hours': total_on_duty,
+            'started_with_cycle_hours': self.starting_cycle_hours or 0,
+            'started_with_driving_hours': self.starting_driving_hours or 0,
+            'started_with_on_duty_hours': self.starting_on_duty_hours or 0
+        }
+
     def save(self, *args, **kwargs):
         """Override save to set company and default vehicle assignment"""
         # Ensure company is set if not specified

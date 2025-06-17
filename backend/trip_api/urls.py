@@ -12,4 +12,7 @@ app_name = 'trip_api'
 
 urlpatterns = [
     path('', include(router.urls)),
+
+    path('driver/current-status/', views.CurrentDriverStatusView.as_view(), name='driver-current-status'),
+    path('driver/update-status/', views.DriverStatusUpdateView.as_view(), name='update-driver-status'),
 ]
