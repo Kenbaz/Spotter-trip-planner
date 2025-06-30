@@ -3,8 +3,7 @@
 from django.contrib import admin
 from .models import Trip, Route, Stops, HOSPeriod, ComplianceReport
 from users.models import DriverCycleStatus, DailyDrivingRecord
-from .services import DriverCycleStatusService
-from django.utils import timezone
+from .services.DriverCycleStatusService import DriverCycleStatusService
 from django.utils.html import format_html
 
 

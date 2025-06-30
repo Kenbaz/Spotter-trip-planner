@@ -9,6 +9,10 @@ import hashlib
 import json
 from ..models import Trip, HOSPeriod, ComplianceReport
 from users.models import DriverCycleStatus
+import logging
+
+
+logger = logging.getLogger(__name__)
 
 
 class HOSCalculatorService:
@@ -344,7 +348,7 @@ class HOSCalculatorService:
     
     def generate_compliance_report(self, trip: Trip) -> ComplianceReport:
         """
-        Generate comprehensive compliance report for a trip
+        Generate comprehensive compliance report for completed trips with ELD Validations
         """
         periods = trip.hos_periods.all().order_by('start_datetime')
         
@@ -485,4 +489,193 @@ class HOSCalculatorService:
             'estimated_arrival_time': feasibility['estimated_completion_time'],
             'required_breaks': feasibility['required_breaks'],
             'is_feasible': True
+        }
+    
+
+    def generate_trip_planning_compliance_report(self, trip: Trip) -> ComplianceReport:
+        """
+        Generate compliance report specifically for trip planning WITH proper calculation
+        """
+        # Get HOS periods - check both saved and calculated periods
+        periods = trip.hos_periods.all().order_by('start_datetime')
+        
+        # If no saved periods, use the calculated values from route planning
+        if not periods.exists():
+            logger.info("No saved HOS periods found, using trip calculated values")
+            
+            # Use the calculated driving time from route planning
+            planned_driving_hours = Decimal(str(trip.total_driving_time or 0))
+            planned_on_duty_hours = Decimal(str(trip.total_on_duty_time or 0))
+            planned_off_duty_hours = Decimal('0.5')  # Assume 30 min break if break was inserted
+            
+            # Count actual breaks from stops
+            break_stops = trip.stops.filter(stop_type='mandatory_break')
+            scheduled_breaks = break_stops.count()
+            
+        else:
+            # Calculate from actual periods
+            planned_driving_hours = sum(
+                Decimal(p.duration_minutes) / 60 
+                for p in periods if p.duty_status == 'driving'
+            )
+            planned_on_duty_hours = sum(
+                Decimal(p.duration_minutes) / 60 
+                for p in periods if p.duty_status in ['driving', 'on_duty_not_driving']
+            )
+            planned_off_duty_hours = sum(
+                Decimal(p.duration_minutes) / 60 
+                for p in periods if p.duty_status in ['off_duty', 'sleeper_berth']
+            )
+            
+            # Count breaks from periods
+            break_periods = [p for p in periods if p.duty_status == 'off_duty' and p.duration_minutes >= 30]
+            scheduled_breaks = len(break_periods)
+
+        # Get driver's starting conditions
+        starting_cycle_hours = Decimal(trip.starting_cycle_hours or 0)
+        starting_driving_hours = Decimal(trip.starting_driving_hours or 0)
+        starting_on_duty_hours = Decimal(trip.starting_on_duty_hours or 0)
+
+        # Calculate cumulative hours after trip
+        total_driving_after_trip = starting_driving_hours + planned_driving_hours
+        total_on_duty_after_trip = starting_on_duty_hours + planned_on_duty_hours
+
+        violations = []
+        warnings = []
+
+        # Validate daily driving limits (11 hours max)
+        daily_driving = self.validate_daily_driving_limits(total_driving_after_trip)
+        if not daily_driving['is_compliant']:
+            violations.append({
+                'type': 'daily_driving_limit',
+                'details': {
+                    **daily_driving,
+                    'starting_hours': float(starting_driving_hours),
+                    'trip_hours': float(planned_driving_hours),
+                    'total_after_trip': float(total_driving_after_trip)
+                }
+            })
+        elif daily_driving['remaining_hours'] <= 1:
+            warnings.append({
+                'type': 'approaching_driving_limit',
+                'message': f'Only {daily_driving["remaining_hours"]:.1f} hours remaining for driving after this trip'
+            })
+
+        # Validate daily on-duty limits (14 hours max)
+        daily_on_duty = self.validate_daily_on_duty_limits(total_on_duty_after_trip)
+        if not daily_on_duty['is_compliant']:
+            violations.append({
+                'type': 'daily_on_duty_limit',
+                'details': {
+                    **daily_on_duty,
+                    'starting_hours': float(starting_on_duty_hours),
+                    'trip_hours': float(planned_on_duty_hours),
+                    'total_after_trip': float(total_on_duty_after_trip)
+                }
+            })
+        elif daily_on_duty['remaining_hours'] <= 1:
+            warnings.append({
+                'type': 'approaching_on_duty_limit',
+                'message': f'Only {daily_on_duty["remaining_hours"]:.1f} hours remaining for on-duty time after this trip'
+            })
+
+        # Validate 30-minute break requirement
+        required_breaks = 1 if planned_driving_hours > 8 else 0
+        
+        if required_breaks > scheduled_breaks:
+            violations.append({
+                'type': 'missing_30min_break',
+                'details': {
+                    'breaks_required': required_breaks,
+                    'breaks_scheduled': scheduled_breaks,
+                    'continuous_hours': float(planned_driving_hours),
+                    'description': f'Trip plan shows {planned_driving_hours:.2f} hours of continuous driving without required 30-minute break'
+                }
+            })
+
+        # Calculate compliance score correctly (max 100%)
+        total_checks = 3  # driving, on-duty, breaks
+        passed_checks = sum([
+            daily_driving['is_compliant'],
+            daily_on_duty['is_compliant'],
+            scheduled_breaks >= required_breaks  # Break compliance
+        ])
+        
+        # Compliance score should be 0-100%, not 0-200%
+        compliance_score = Decimal((passed_checks / total_checks) * 100)
+        is_compliant = len(violations) == 0
+
+        # Create or update compliance report
+        compliance_report, created = ComplianceReport.objects.update_or_create(
+            trip=trip,
+            defaults={
+                'is_compliant': is_compliant,
+                'compliance_score': compliance_score,
+                'total_driving_hours': planned_driving_hours,
+                'total_on_duty_hours': planned_on_duty_hours,
+                'total_off_duty_hours': planned_off_duty_hours,
+                'violations': violations,
+                'warnings': warnings,
+                'required_30min_breaks': required_breaks,
+                'scheduled_30min_breaks': scheduled_breaks,
+                'required_daily_resets': 1 if total_on_duty_after_trip > self.max_on_duty_hours else 0,
+                'scheduled_daily_resets': 1 if planned_off_duty_hours >= self.required_off_duty_hours else 0
+            }
+        )
+
+        logger.info(f"Compliance report generated:")
+        logger.info(f"  - Driving hours: {planned_driving_hours}")
+        logger.info(f"  - On-duty hours: {planned_on_duty_hours}")
+        logger.info(f"  - Required breaks: {required_breaks}")
+        logger.info(f"  - Scheduled breaks: {scheduled_breaks}")
+        logger.info(f"  - Compliance score: {compliance_score}%")
+        logger.info(f"  - Is compliant: {is_compliant}")
+
+        return compliance_report
+    
+    def validate_30_minute_break_requirement_for_planning(self, periods: List[HOSPeriod], total_driving_hours: Decimal) -> Dict[str, any]:
+        """
+        Validate 30-minute break requirement specifically for trip planning.
+        This checks if breaks are properly scheduled within the planned trip.
+        """
+        if total_driving_hours <= self.max_hours_before_break:
+            return {
+                'is_compliant': True,
+                'breaks_required': 0,
+                'breaks_taken': 0,
+                'violations': [],
+                'continuous_driving_hours': float(total_driving_hours),
+            }
+        
+        continuous_driving_hours = Decimal('0')
+        breaks_taken = 0
+        violations = []
+
+        # Look for 30+ minute breaks in the planned periods
+        for period in periods:
+            if period.duty_status == 'driving':
+                continuous_driving_hours += Decimal(period.duration_minutes) / 60
+            elif period.duty_status in ['off_duty', 'sleeper_berth']:
+                if period.duration_minutes >= self.required_break_minutes:
+                    breaks_taken += 1
+                    continuous_driving_hours = Decimal('0')
+        
+        # Check if we ended with too much continuous driving
+        if continuous_driving_hours > self.max_hours_before_break:
+            violations.append({
+                'type': 'missing_30minute_break',
+                'description': f'Trip plan shows {float(continuous_driving_hours):.2f} hours of continuous driving without required 30-minute break',
+                'continuous_hours': float(continuous_driving_hours),
+                'breaks_scheduled': breaks_taken
+            })
+
+        break_required = max(1, int(total_driving_hours / self.max_hours_before_break))
+        is_compliant = len(violations) == 0 and breaks_taken >= break_required
+
+        return {
+            'is_compliant': is_compliant,
+            'breaks_required': break_required,
+            'breaks_taken': breaks_taken,
+            'violations': violations,
+            'continuous_driving_hours': float(continuous_driving_hours)
         }

@@ -3,15 +3,13 @@
 from datetime import datetime, timedelta
 from typing import List, Dict, Tuple, Optional
 from decimal import Decimal
-from django.utils import timezone
 from django.core.cache import cache, caches
-import hashlib
-import json
 import logging
 from ..models import Trip, Route, Stops, HOSPeriod
 from .hos_calculator import HOSCalculatorService
 from .external_apis import ExternalAPIService
 from users.models import DriverCycleStatus
+import polyline
 
 
 logger = logging.getLogger(__name__)
@@ -195,7 +193,7 @@ class RoutePlannerService:
                 }
             ],
             
-            # Combined geometry (would need processing for real map display)
+            # Combined geometry
             'combined_geometry': {
                 'type': 'combined_polylines',
                 'deadhead_polyline': deadhead_route['geometry'],
@@ -204,15 +202,16 @@ class RoutePlannerService:
         }
     
     def _generate_three_location_route_plan_with_status(
-            self, 
-            trip: Trip, 
-            deadhead_route: Dict, 
-            loaded_route: Dict, 
-            feasibility_report: Dict,
-            driver_status: 'DriverCycleStatus' = None
-        ) -> Dict[str, any]:
+        self, 
+        trip: Trip, 
+        deadhead_route: Dict, 
+        loaded_route: Dict, 
+        feasibility_report: Dict,
+        driver_status: 'DriverCycleStatus' = None
+    ) -> Dict[str, any]:
         """
-        Generate detailed route plan for three-location trip structure
+        Generate detailed route plan for three-location trip structure 
+        WITH automatic break insertion, fuel stops, AND HOS periods
         """
         route_plan = {
             'stops': [],
@@ -228,6 +227,7 @@ class RoutePlannerService:
         current_distance = Decimal('0')
         stop_sequence = 1
 
+        # Handle driver status context
         if driver_status:
             route_plan['current_status_impact'] = {
                 'cycle_hours_used': driver_status.total_cycle_hours,
@@ -235,7 +235,6 @@ class RoutePlannerService:
                 'today_driving_hours': driver_status.today_driving_hours,
                 'remaining_driving_today': driver_status.remaining_driving_hours_today,
                 'today_on_duty_hours': driver_status.today_on_duty_hours,
-                'remaining_on_duty_today': driver_status,
                 'remaining_on_duty_today': driver_status.remaining_on_duty_hours_today,
                 'current_duty_status': driver_status.current_duty_status,
                 'needs_immediate_break': driver_status.needs_immediate_break,
@@ -244,207 +243,632 @@ class RoutePlannerService:
                 'compliance_warnings': driver_status.compliance_warnings
             }
 
-            # Check if driver needs immediate break after starting
+            # Critical warning for immediate break
             if driver_status.needs_immediate_break:
                 route_plan['optimization_notes'].append(
                     "CRITICAL: Driver must take 30-minute break immediately before starting trip"
                 )
 
-                # Insert mandatory break at current location
-                immediate_break_stop = {
-                    'type': 'mandatory_break',
-                    'address': trip.current_address,
-                    'latitude': float(trip.current_latitude),
-                    'longitude': float(trip.current_longitude),
-                    'arrival_time': current_time,
-                    'duration_minutes': 30,
-                    'distance_from_origin': 0,
-                    'sequence_order': stop_sequence,
-                    'leg_type': 'pre_trip',
-                    'is_required_for_compliance': True,
-                    'break_reason': 'Mandatory break - already driving 8+ hours'
-                }
-                immediate_break_stop['departure_time'] = current_time + timedelta(minutes=30)
-
-                route_plan['stops'].append(immediate_break_stop)
-
-                # Add break HOS period
-                route_plan['hos_periods'].append({
-                    'duty_status': 'off_duty',
-                    'start_datetime': current_time,
-                    'end_datetime': immediate_break_stop['departure_time'],
-                    'duration_minutes': 30,
-                    'start_location': trip.current_address,
-                    'end_location': trip.current_address,
-                    'leg_type': 'pre_trip'
-                })
-                
-                current_time = immediate_break_stop['departure_time']
-                stop_sequence += 1
-            
-            # Check if trip will exceed daily limits
-            total_estimated_hours = (deadhead_route['duration_hours'] + 
-                                    loaded_route['duration_hours'] + 
-                                    (trip.pickup_duration_minutes + trip.delivery_duration_minutes) / 60)
-            
-            if (driver_status.today_on_duty_hours + total_estimated_hours) > 14:
-                route_plan['optimization_notes'].append(
-                    f"WARNING: Trip will exceed 14-hour on-duty limit. Need daily reset after {driver_status.remaining_on_duty_hours_today:.1f} more hours"
-                )
-            
-            if (driver_status.today_driving_hours + deadhead_route['duration_hours'] + loaded_route['duration_hours']) > 11:
-                route_plan['optimization_notes'].append(
-                    f"WARNING: Trip will exceed 11-hour driving limit. Need to split trip or take daily reset"
-                )
+        # ===== STEP 1: Create basic route stops =====
         
-
-        # STOP 1: Trip Start (Current Location)
-        trip_start_stop = {
+        # 1. Trip start location
+        route_plan['stops'].append({
             'type': 'trip_start',
+            'sequence_order': stop_sequence,
             'address': trip.current_address,
             'latitude': float(trip.current_latitude),
             'longitude': float(trip.current_longitude),
-            'arrival_time': current_time,
-            'departure_time': current_time,
+            'arrival_time': current_time.isoformat(),
+            'departure_time': current_time.isoformat(),
             'duration_minutes': 0,
             'distance_from_origin': 0,
-            'sequence_order': stop_sequence,
-            'leg_type': 'deadhead'
-        }
-        route_plan['stops'].append(trip_start_stop)
+            'is_required_for_compliance': False,
+            'break_reason': None
+        })
         stop_sequence += 1
 
-        # DEADHEAD LEG: Current Location → Pickup Location
-        
-        # Add deadhead fuel stops and breaks if needed
-        deadhead_stops = self._calculate_leg_stops_with_status(
-            trip, 
-            deadhead_route, 
-            'deadhead',
-            start_sequence=stop_sequence,
-            start_distance=current_distance,
-            driver_status=driver_status,
-            accumulated_driving_today=driver_status.today_driving_hours if driver_status else 0
-        )
-        
-        # Add deadhead driving periods and stops
-        deadhead_periods, deadhead_end_time = self._generate_leg_periods(
-            trip,
-            deadhead_route,
-            current_time,
-            trip.current_address,
-            trip.pickup_address,
-            deadhead_stops,
-            'deadhead'
-        )
-        
-        route_plan['stops'].extend(deadhead_stops)
-        route_plan['hos_periods'].extend(deadhead_periods)
-        current_time = deadhead_end_time
+        # 2. Pickup location
+        deadhead_duration = timedelta(hours=deadhead_route['duration_hours'])
+        pickup_arrival = current_time + deadhead_duration
         current_distance += Decimal(str(deadhead_route['distance_miles']))
-        stop_sequence += len(deadhead_stops)
 
-
-        # STOP 2: Pickup Location
-        pickup_stop = {
+        route_plan['stops'].append({
             'type': 'pickup',
+            'sequence_order': stop_sequence,
             'address': trip.pickup_address,
             'latitude': float(trip.pickup_latitude),
             'longitude': float(trip.pickup_longitude),
-            'arrival_time': current_time,
+            'arrival_time': pickup_arrival.isoformat(),
+            'departure_time': (pickup_arrival + timedelta(minutes=trip.pickup_duration_minutes)).isoformat(),
             'duration_minutes': trip.pickup_duration_minutes,
             'distance_from_origin': float(current_distance),
-            'sequence_order': stop_sequence,
-            'leg_type': 'transition'
-        }
-        pickup_stop['departure_time'] = current_time + timedelta(minutes=trip.pickup_duration_minutes)
-        route_plan['stops'].append(pickup_stop)
-        
-        # Add pickup HOS period
-        pickup_period = {
-            'duty_status': 'on_duty_not_driving',
-            'start_datetime': current_time,
-            'end_datetime': pickup_stop['departure_time'],
-            'duration_minutes': trip.pickup_duration_minutes,
-            'start_location': trip.pickup_address,
-            'end_location': trip.pickup_address,
-            'leg_type': 'pickup'
-        }
-        route_plan['hos_periods'].append(pickup_period)
-        
-        current_time = pickup_stop['departure_time']
-        route_plan['estimated_pickup_time'] = current_time
+            'is_required_for_compliance': False,
+            'break_reason': None
+        })
         stop_sequence += 1
 
-        # LOADED LEG: Pickup Location → Delivery Location
-
-        # Calculate loaded stops considering accumulated driving time
-        current_driving_today = (driver_status.today_driving_hours + deadhead_route['duration_hours']) if driver_status else deadhead_route['duration_hours']
-
-        
-        # Add loaded leg fuel stops and breaks if needed
-        loaded_stops = self._calculate_leg_stops_with_status(
-            trip, 
-            loaded_route, 
-            'loaded',
-            start_sequence=stop_sequence,
-            start_distance=current_distance,
-            driver_status=driver_status,
-            accumulated_driving_today=current_driving_today
-        )
-        
-        # Add loaded driving periods and stops
-        loaded_periods, loaded_end_time = self._generate_leg_periods(
-            trip,
-            loaded_route,
-            current_time,
-            trip.pickup_address,
-            trip.delivery_address,
-            loaded_stops,
-            'loaded'
-        )
-        
-        route_plan['stops'].extend(loaded_stops)
-        route_plan['hos_periods'].extend(loaded_periods)
-        current_time = loaded_end_time
+        # 3. Delivery location
+        pickup_departure = pickup_arrival + timedelta(minutes=trip.pickup_duration_minutes)
+        loaded_duration = timedelta(hours=loaded_route['duration_hours'])
+        delivery_arrival = pickup_departure + loaded_duration
         current_distance += Decimal(str(loaded_route['distance_miles']))
-        stop_sequence += len(loaded_stops)
 
-        # === STOP 3: Delivery Location ===
-        delivery_stop = {
-           'type': 'delivery',
-           'address': trip.delivery_address,
-           'latitude': float(trip.delivery_latitude),
-           'longitude': float(trip.delivery_longitude),
-           'arrival_time': current_time,
-           'duration_minutes': trip.delivery_duration_minutes,
-           'distance_from_origin': float(current_distance),
-           'sequence_order': stop_sequence,
-           'leg_type': 'delivery'
-        }
-        delivery_stop['departure_time'] = current_time + timedelta(minutes=trip.delivery_duration_minutes)
+        route_plan['stops'].append({
+            'type': 'delivery',
+            'sequence_order': stop_sequence,
+            'address': trip.delivery_address,
+            'latitude': float(trip.delivery_latitude),
+            'longitude': float(trip.delivery_longitude),
+            'arrival_time': delivery_arrival.isoformat(),
+            'departure_time': (delivery_arrival + timedelta(minutes=trip.delivery_duration_minutes)).isoformat(),
+            'duration_minutes': trip.delivery_duration_minutes,
+            'distance_from_origin': float(current_distance),
+            'is_required_for_compliance': False,
+            'break_reason': None
+        })
 
-        route_plan['stops'].append(delivery_stop)
+        # ===== STEP 1.5: CALCULATE AND INSERT FUEL STOPS =====
+        
+        total_driving_hours = deadhead_route['duration_hours'] + loaded_route['duration_hours']
+        total_distance_miles = float(current_distance)
+        
+        # Check if fuel stops are needed based on max fuel distance
+        max_fuel_distance = trip.max_fuel_distance_miles or 1000
+        
+        logger.info(f"⛽ Checking fuel stops: max distance = {max_fuel_distance} miles, total trip = {total_distance_miles:.1f} miles")
+        
+        if total_distance_miles > max_fuel_distance:
+            fuel_stops_needed = int(total_distance_miles // max_fuel_distance)
+            logger.info(f"⛽ Fuel stops needed: {fuel_stops_needed}")
+            
+            # Generate fuel stops
+            for i in range(1, fuel_stops_needed + 1):
+                fuel_distance = i * max_fuel_distance
+                
+                # Don't add fuel stop if it's too close to pickup or delivery (within 100 miles)
+                pickup_distance = deadhead_route['distance_miles']
+                delivery_distance = total_distance_miles
+                
+                too_close_to_pickup = abs(fuel_distance - pickup_distance) < 100
+                too_close_to_delivery = abs(fuel_distance - delivery_distance) < 100
+                
+                if not too_close_to_pickup and not too_close_to_delivery and fuel_distance < total_distance_miles:
+                    # Find location for this fuel stop
+                    fuel_location = self._find_break_location_with_coordinates(
+                        trip, fuel_distance, deadhead_route, loaded_route
+                    )
+                    
+                    # Calculate fuel stop timing (rough estimate)
+                    fuel_timing = self._calculate_break_timing(
+                        current_time, fuel_distance, total_distance_miles,
+                        deadhead_duration, loaded_duration, trip.pickup_duration_minutes
+                    )
+                    
+                    # Create fuel stop
+                    fuel_stop = {
+                        'type': 'fuel',
+                        'sequence_order': 0,  # Will be updated when we re-sort
+                        'address': fuel_location['address'].replace('Rest Area', 'Fuel Station & Truck Stop'),
+                        'latitude': fuel_location['latitude'],
+                        'longitude': fuel_location['longitude'],
+                        'arrival_time': fuel_timing['arrival_time'].isoformat(),
+                        'departure_time': (fuel_timing['arrival_time'] + timedelta(minutes=45)).isoformat(),
+                        'duration_minutes': 45,  # Standard fuel stop duration
+                        'distance_from_origin': fuel_distance,
+                        'is_required_for_compliance': False,
+                        'break_reason': f'Fuel stop #{i} - refueling after {fuel_distance:.0f} miles'
+                    }
+                    
+                    # Add fuel stop to route plan
+                    route_plan['stops'].append(fuel_stop)
+                    
+                    logger.info(f"⛽ Added fuel stop #{i} at mile {fuel_distance:.1f}")
+                    
+                    # Add optimization note
+                    route_plan['optimization_notes'].append(
+                        f"Added fuel stop #{i} at mile {fuel_distance:.1f} for refueling"
+                    )
+            
+            logger.info(f"⛽ Total fuel stops added: {len([s for s in route_plan['stops'] if s['type'] == 'fuel'])}")
+        else:
+            logger.info(f"⛽ No fuel stops needed: trip distance {total_distance_miles:.1f} miles < max fuel distance {max_fuel_distance} miles")
 
-        # Add delivery HOS period
-        delivery_period = {
-           'duty_status': 'on_duty_not_driving',
-           'start_datetime': current_time,
-           'end_datetime': delivery_stop['departure_time'],
-           'duration_minutes': trip.delivery_duration_minutes,
-           'start_location': trip.delivery_address,
-           'end_location': trip.delivery_address,
-           'leg_type': 'delivery'
-        }
-        route_plan['hos_periods'].append(delivery_period)
+        # ===== STEP 2: HOS COMPLIANCE CHECK AND BREAK INSERTION =====
+        
+        logger.info(f"🔍 HOS compliance check: {total_driving_hours:.2f} hours driving, {total_distance_miles:.1f} miles")
+        
+        # Check if 30-minute break is required (8+ hours driving without break)
+        if total_driving_hours > 8.0:
+            logger.info(f"⚠️ Break required: {total_driving_hours:.2f} hours exceeds 8-hour limit")
+            
+            # Calculate optimal break location (after 8 hours of driving)
+            break_after_hours = 8.0
+            break_distance = self._calculate_break_distance(
+                break_after_hours, 
+                total_driving_hours, 
+                deadhead_route, 
+                loaded_route
+            )
+            
+            logger.info(f"📍 Calculated break location: mile {break_distance:.1f}")
+            
+            # Check if we can combine with existing fuel stop
+            existing_fuel_stops = [s for s in route_plan['stops'] if s['type'] == 'fuel']
+            combined_with_fuel = False
+            
+            for fuel_stop in existing_fuel_stops:
+                distance_diff = abs(fuel_stop['distance_from_origin'] - break_distance)
+                if distance_diff < 50:  # Within 50 miles, combine them
+                    logger.info(f"🔄 Combining break with fuel stop at mile {fuel_stop['distance_from_origin']:.1f}")
+                    
+                    # Convert fuel stop to combined stop
+                    fuel_stop['type'] = 'fuel_and_break'
+                    fuel_stop['duration_minutes'] = max(45, 30)  # Take longer of fuel or break time
+                    fuel_stop['is_required_for_compliance'] = True
+                    fuel_stop['break_reason'] = 'Combined fuel and mandatory 30-minute break'
+                    fuel_stop['address'] = fuel_stop['address'].replace('Fuel Station', 'Fuel & Rest Stop')
+                    
+                    route_plan['optimization_notes'].append(
+                        f"Combined mandatory break with fuel stop at mile {fuel_stop['distance_from_origin']:.1f}"
+                    )
+                    
+                    combined_with_fuel = True
+                    break
+            
+            # If not combined with fuel stop, create separate break
+            if not combined_with_fuel:
+                # Find actual location coordinates and address
+                break_location = self._find_break_location_with_coordinates(
+                    trip, break_distance, deadhead_route, loaded_route
+                )
+                
+                # Calculate break timing
+                break_timing = self._calculate_break_timing(
+                    current_time, break_distance, total_distance_miles,
+                    deadhead_duration, loaded_duration, trip.pickup_duration_minutes
+                )
+                
+                # Create mandatory break stop
+                break_stop = {
+                    'type': 'mandatory_break',
+                    'sequence_order': 0,  # Will be updated when we re-sort
+                    'address': break_location['address'],
+                    'latitude': break_location['latitude'],
+                    'longitude': break_location['longitude'],
+                    'arrival_time': break_timing['arrival_time'].isoformat(),
+                    'departure_time': break_timing['departure_time'].isoformat(),
+                    'duration_minutes': 30,
+                    'distance_from_origin': break_distance,
+                    'is_required_for_compliance': True,
+                    'break_reason': f'DOT required 30-minute break after {break_after_hours} hours of driving'
+                }
+                
+                # Insert break into route plan
+                route_plan['stops'].append(break_stop)
+                
+                # Add success note
+                route_plan['optimization_notes'].append(
+                    f"Inserted mandatory 30-minute break at mile {break_distance:.1f} for HOS compliance"
+                )
+                
+                logger.info(f"🛑 Break stop inserted: {break_location['address']} at mile {break_distance:.1f}")
+            
+            # Adjust subsequent stop timings for 30-minute delay
+            break_delay = timedelta(minutes=30)
+            delivery_stop = next((s for s in route_plan['stops'] if s['type'] == 'delivery'), None)
+            if delivery_stop:
+                original_arrival = datetime.fromisoformat(delivery_stop['arrival_time'].replace('Z', '+00:00'))
+                new_arrival = original_arrival + break_delay
+                new_departure = new_arrival + timedelta(minutes=delivery_stop['duration_minutes'])
+                
+                delivery_stop['arrival_time'] = new_arrival.isoformat()
+                delivery_stop['departure_time'] = new_departure.isoformat()
+        
+        else:
+            logger.info(f"✅ No break required: {total_driving_hours:.2f} hours is under 8-hour limit")
 
-       # Calculate final totals
-        final_end_time = delivery_stop['departure_time']
-        total_trip_time = final_end_time - trip.departure_datetime
-        route_plan['total_duration_hours'] = total_trip_time.total_seconds() / 3600
-        route_plan['estimated_arrival'] = final_end_time
-
+        # ===== STEP 3: GENERATE HOS PERIODS =====
+        
+        # Generate HOS periods based on the stops
+        route_plan['hos_periods'] = self._generate_hos_periods_for_route_plan(trip, route_plan)
+        
+        # ===== STEP 4: FINALIZE ROUTE PLAN =====
+        
+        # Sort stops by distance and update sequence
+        route_plan['stops'].sort(key=lambda x: x['distance_from_origin'])
+        for i, stop in enumerate(route_plan['stops']):
+            stop['sequence_order'] = i + 1
+        
+        # Calculate final totals
+        final_arrival = datetime.fromisoformat(route_plan['stops'][-1]['departure_time'].replace('Z', '+00:00'))
+        total_duration = final_arrival - current_time
+        route_plan['total_duration_hours'] = total_duration.total_seconds() / 3600
+        
+        # Set estimated times
+        pickup_stop = next((s for s in route_plan['stops'] if s['type'] == 'pickup'), None)
+        delivery_stop = next((s for s in route_plan['stops'] if s['type'] == 'delivery'), None)
+        
+        route_plan['estimated_pickup_time'] = pickup_stop['arrival_time'] if pickup_stop else None
+        route_plan['estimated_arrival'] = delivery_stop['arrival_time'] if delivery_stop else None
+        
+        # ===== STEP 5: RECALCULATE COMPLIANCE =====
+        self._recalculate_compliance_with_breaks(trip, route_plan)
+        
+        # Final summary
+        stops_summary = {}
+        for stop in route_plan['stops']:
+            stop_type = stop['type']
+            stops_summary[stop_type] = stops_summary.get(stop_type, 0) + 1
+        
+        logger.info(f"🎯 Final route plan complete:")
+        logger.info(f"   📍 Total stops: {len(route_plan['stops'])}")
+        logger.info(f"   🛑 Stop breakdown: {stops_summary}")
+        logger.info(f"   ⏰ Total trip time: {route_plan['total_duration_hours']:.2f} hours")
+        logger.info(f"   📋 HOS periods: {len(route_plan['hos_periods'])}")
+        logger.info(f"   📝 Optimization notes: {len(route_plan['optimization_notes'])}")
+        
         return route_plan
+    
+
+    def _generate_hos_periods_for_route_plan(self, trip: Trip, route_plan: Dict) -> List[Dict]:
+        """
+        Generate HOS periods based on the route plan stops WITH CORRECT SEQUENTIAL TIMING.
+        This creates the driving, on-duty, and off-duty periods needed for compliance calculation.
+        """
+        hos_periods = []
+        stops = route_plan['stops']
+        
+        if len(stops) < 2:
+            logger.warning("Not enough stops to generate HOS periods")
+            return hos_periods
+        
+        # Start with the trip departure time
+        current_time = trip.departure_datetime
+        
+        logger.info(f"🕐 Starting HOS period generation at {current_time}")
+        
+        # Process each stop sequentially
+        for i in range(len(stops)):
+            current_stop = stops[i]
+            
+            logger.info(f"📍 Processing stop {i+1}: {current_stop['type']} at mile {current_stop['distance_from_origin']}")
+            
+            # 1. DRIVING period TO this stop (except for trip start)
+            if i > 0:  # Skip driving to trip start
+                previous_stop = stops[i-1]
+                
+                # Calculate driving distance and time
+                distance_traveled = current_stop['distance_from_origin'] - previous_stop['distance_from_origin']
+                
+                if distance_traveled > 0:
+                    # Calculate actual driving time based on distance and average speed
+                    average_speed_mph = 60  # Highway speed
+                    driving_time_hours = distance_traveled / average_speed_mph
+                    driving_time_minutes = int(driving_time_hours * 60)
+                    
+                    # Driving period starts when we leave previous stop
+                    driving_start_time = current_time
+                    driving_end_time = current_time + timedelta(minutes=driving_time_minutes)
+                    
+                    # Create driving period
+                    driving_period = {
+                        'duty_status': 'driving',
+                        'start_datetime': driving_start_time.isoformat(),
+                        'end_datetime': driving_end_time.isoformat(),
+                        'duration_minutes': driving_time_minutes,
+                        'start_location': previous_stop['address'],
+                        'end_location': current_stop['address'],
+                        'distance_traveled_miles': distance_traveled,
+                        'leg_type': 'driving'
+                    }
+                    
+                    hos_periods.append(driving_period)
+                    
+                    # Update current time to arrival at this stop
+                    current_time = driving_end_time
+                    
+                    logger.info(f"  🚛 Driving period: {driving_time_minutes} min ({distance_traveled:.1f} miles)")
+                    logger.info(f"  🕐 Arrived at {current_stop['type']} at {current_time}")
+            
+            # 2. STOP period AT this location (except trip start which has 0 duration)
+            if current_stop['duration_minutes'] > 0:
+                # Stop period starts when we arrive
+                stop_start_time = current_time
+                stop_end_time = current_time + timedelta(minutes=current_stop['duration_minutes'])
+                
+                # Determine duty status based on stop type
+                if current_stop['type'] == 'mandatory_break':
+                    duty_status = 'off_duty'  # Break is off-duty
+                elif current_stop['type'] in ['pickup', 'delivery']:
+                    duty_status = 'on_duty_not_driving'  # Loading/unloading
+                else:
+                    duty_status = 'on_duty_not_driving'  # Default for other stops
+                
+                # Create stop period
+                stop_period = {
+                    'duty_status': duty_status,
+                    'start_datetime': stop_start_time.isoformat(),
+                    'end_datetime': stop_end_time.isoformat(),
+                    'duration_minutes': current_stop['duration_minutes'],
+                    'start_location': current_stop['address'],
+                    'end_location': current_stop['address'],
+                    'distance_traveled_miles': 0,  # No travel during stop
+                    'leg_type': current_stop['type']
+                }
+                
+                hos_periods.append(stop_period)
+                
+                # Update current time to when we leave this stop
+                current_time = stop_end_time
+                
+                logger.info(f"  ⏱️  {duty_status} period: {current_stop['duration_minutes']} min")
+                logger.info(f"  🕐 Departed {current_stop['type']} at {current_time}")
+        
+        # Calculate and log totals for verification
+        driving_periods = [p for p in hos_periods if p['duty_status'] == 'driving']
+        on_duty_periods = [p for p in hos_periods if p['duty_status'] in ['driving', 'on_duty_not_driving']]
+        off_duty_periods = [p for p in hos_periods if p['duty_status'] in ['off_duty', 'sleeper_berth']]
+        
+        total_driving_minutes = sum(p['duration_minutes'] for p in driving_periods)
+        total_on_duty_minutes = sum(p['duration_minutes'] for p in on_duty_periods)
+        total_off_duty_minutes = sum(p['duration_minutes'] for p in off_duty_periods)
+        
+        logger.info(f"📊 HOS Periods Summary:")
+        logger.info(f"  📍 Total periods: {len(hos_periods)}")
+        logger.info(f"  🚛 Driving time: {total_driving_minutes/60:.2f} hours ({len(driving_periods)} periods)")
+        logger.info(f"  ⏰ On-duty time: {total_on_duty_minutes/60:.2f} hours")
+        logger.info(f"  😴 Off-duty time: {total_off_duty_minutes/60:.2f} hours")
+        
+        return hos_periods
+    
+
+    def _recalculate_compliance_with_breaks(self, trip: Trip, route_plan: Dict) -> None:
+        """
+        Recalculate compliance after breaks are inserted to ensure accurate reporting.
+        """
+        try:
+            # Calculate totals from route plan HOS periods
+            driving_periods = [p for p in route_plan['hos_periods'] if p['duty_status'] == 'driving']
+            on_duty_periods = [p for p in route_plan['hos_periods'] if p['duty_status'] in ['driving', 'on_duty_not_driving']]
+            off_duty_periods = [p for p in route_plan['hos_periods'] if p['duty_status'] in ['off_duty', 'sleeper_berth']]
+            
+            total_driving_minutes = sum(p['duration_minutes'] for p in driving_periods)
+            total_on_duty_minutes = sum(p['duration_minutes'] for p in on_duty_periods)
+            total_off_duty_minutes = sum(p['duration_minutes'] for p in off_duty_periods)
+            
+            # Count scheduled breaks
+            mandatory_breaks = len([s for s in route_plan['stops'] if s['type'] == 'mandatory_break'])
+            
+            # Update trip fields for compliance calculation
+            trip.total_driving_time = total_driving_minutes / 60.0
+            trip.total_on_duty_time = total_on_duty_minutes / 60.0
+            
+            # Also update the individual leg driving times for consistency
+            # Find deadhead and loaded driving periods
+            deadhead_driving = sum(
+                p['duration_minutes'] for p in driving_periods 
+                if p.get('leg_type') == 'driving' and 'pickup' in p.get('end_location', '').lower()
+            )
+            loaded_driving = sum(
+                p['duration_minutes'] for p in driving_periods 
+                if p.get('leg_type') == 'driving' and 'delivery' in p.get('end_location', '').lower()
+            )
+            
+            # Update individual leg times if we can identify them
+            if deadhead_driving > 0:
+                trip.deadhead_driving_time = deadhead_driving / 60.0
+            if loaded_driving > 0:
+                trip.loaded_driving_time = loaded_driving / 60.0
+            
+            logger.info(f"✅ Compliance recalculated:")
+            logger.info(f"  🚛 Total driving: {total_driving_minutes/60:.2f}h")
+            logger.info(f"  ⏰ Total on-duty: {total_on_duty_minutes/60:.2f}h")
+            logger.info(f"  😴 Total off-duty: {total_off_duty_minutes/60:.2f}h")
+            logger.info(f"  🛑 Mandatory breaks: {mandatory_breaks}")
+            
+        except Exception as e:
+            logger.error(f"Error recalculating compliance: {str(e)}")
+    
+
+    def _calculate_break_distance(
+            self, break_after_hours: float, total_driving_hours: float, deadhead_route: Dict, loaded_route: Dict
+        ) -> float:
+        """
+        Calculate the distance where break should occur based on driving time.
+        """
+        # Calculate cumulative driving time to find where 8 hours occurs
+        deadhead_hours = deadhead_route['duration_hours']
+        deadhead_miles = deadhead_route['distance_miles']
+        loaded_miles = loaded_route['distance_miles']
+        
+        if break_after_hours <= deadhead_hours:
+            # Break occurs during deadhead leg
+            ratio = break_after_hours / deadhead_hours
+            return deadhead_miles * ratio
+        else:
+            # Break occurs during loaded leg
+            remaining_hours = break_after_hours - deadhead_hours
+            loaded_hours = loaded_route['duration_hours']
+            ratio = remaining_hours / loaded_hours if loaded_hours > 0 else 0
+            return deadhead_miles + (loaded_miles * ratio)
+    
+
+    def _find_break_location_with_coordinates(self, trip: Trip, break_distance: float, deadhead_route: Dict, loaded_route: Dict) -> Dict:
+        """
+        Find actual GPS coordinates and address for break location using route geometry.
+        """
+        try:
+            # Determine which route leg contains the break
+            deadhead_miles = deadhead_route['distance_miles']
+            
+            if break_distance <= deadhead_miles:
+                # Break is in deadhead leg
+                leg_distance = break_distance
+                leg_total_distance = deadhead_miles
+                route_geometry = deadhead_route.get('geometry')
+                leg_type = 'deadhead'
+                start_coords = (float(trip.current_latitude), float(trip.current_longitude))
+                end_coords = (float(trip.pickup_latitude), float(trip.pickup_longitude))
+            else:
+                # Break is in loaded leg
+                leg_distance = break_distance - deadhead_miles
+                leg_total_distance = loaded_route['distance_miles']
+                route_geometry = loaded_route.get('geometry')
+                leg_type = 'loaded'
+                start_coords = (float(trip.pickup_latitude), float(trip.pickup_longitude))
+                end_coords = (float(trip.delivery_latitude), float(trip.delivery_longitude))
+            
+            # Get coordinates from route geometry
+            if route_geometry and isinstance(route_geometry, str):
+                # Decode polyline to get route points
+                coordinates = self._interpolate_from_polyline(
+                    route_geometry, 
+                    leg_distance, 
+                    leg_total_distance
+                )
+            else:
+                # Fallback: linear interpolation between start and end
+                ratio = leg_distance / leg_total_distance if leg_total_distance > 0 else 0
+                coordinates = self._linear_interpolate_coordinates(start_coords, end_coords, ratio)
+            
+            # Generate appropriate address
+            mile_marker = int(break_distance)
+            if leg_type == 'deadhead':
+                address = f"Rest Area & Truck Stop (Mile {mile_marker}) - Deadhead Route"
+            else:
+                address = f"Truck Stop & Rest Area (Mile {mile_marker}) - Loaded Route"
+            
+            return {
+                'latitude': coordinates[0],
+                'longitude': coordinates[1],
+                'address': address
+            }
+            
+        except Exception as e:
+            logger.error(f"Error finding break location coordinates: {str(e)}")
+            # Fallback to simple interpolation
+            return self._fallback_break_location(trip, break_distance)
+
+
+    def _interpolate_from_polyline(self, encoded_polyline: str, target_distance: float, total_distance: float) -> Tuple[float, float]:
+        """
+        Interpolate coordinates from encoded polyline geometry.
+        """
+        try:
+            # Decode the polyline
+            decoded_points = polyline.decode(encoded_polyline)
+            
+            if len(decoded_points) < 2:
+                raise ValueError("Invalid polyline data")
+            
+            # Calculate target ratio along the route
+            target_ratio = target_distance / total_distance if total_distance > 0 else 0
+            target_ratio = max(0, min(1, target_ratio))  # Clamp between 0 and 1
+            
+            # Find the appropriate segment in the polyline
+            num_segments = len(decoded_points) - 1
+            segment_index = int(target_ratio * num_segments)
+            segment_index = min(segment_index, num_segments - 1)
+            
+            # Interpolate within the segment
+            segment_ratio = (target_ratio * num_segments) - segment_index
+            
+            start_point = decoded_points[segment_index]
+            end_point = decoded_points[segment_index + 1]
+            
+            # Linear interpolation between two points
+            lat = start_point[0] + (end_point[0] - start_point[0]) * segment_ratio
+            lng = start_point[1] + (end_point[1] - start_point[1]) * segment_ratio
+            
+            return (lat, lng)
+            
+        except Exception as e:
+            logger.error(f"Error interpolating from polyline: {str(e)}")
+            # Fallback to simple calculation
+            return (32.5, -96.5)  # Default coordinates for Texas
+
+
+    def _linear_interpolate_coordinates(
+            self, start_coords: Tuple[float, float], end_coords: Tuple[float, float], ratio: float
+        ) -> Tuple[float, float]:
+        """
+        Simple linear interpolation between two coordinate points.
+        """
+        lat = start_coords[0] + (end_coords[0] - start_coords[0]) * ratio
+        lng = start_coords[1] + (end_coords[1] - start_coords[1]) * ratio
+        return (lat, lng)
+
+
+    def _fallback_break_location(self, trip: Trip, break_distance: float) -> Dict:
+        """
+        Fallback method for break location when geometry interpolation fails.
+        """
+        # Simple midpoint calculation
+        start_lat = float(trip.current_latitude)
+        start_lng = float(trip.current_longitude)
+        end_lat = float(trip.delivery_latitude)
+        end_lng = float(trip.delivery_longitude)
+        
+        # Use simple ratio based on distance
+        total_distance = float(trip.total_distance_miles) if trip.total_distance_miles else 400
+        ratio = break_distance / total_distance
+        
+        lat = start_lat + (end_lat - start_lat) * ratio
+        lng = start_lng + (end_lng - start_lng) * ratio
+        
+        return {
+            'latitude': lat,
+            'longitude': lng,
+            'address': f"Rest Area & Truck Stop (Mile {int(break_distance)})"
+        }
+
+    def _calculate_break_timing(
+            self, start_time: datetime, break_distance: float, total_distance: float, deadhead_duration: timedelta, loaded_duration: timedelta, pickup_duration: int
+        ) -> Dict:
+        """
+        Calculate when the break should start and end based on timing.
+        """
+        # Calculate time ratio to break location
+        distance_ratio = break_distance / total_distance if total_distance > 0 else 0
+        
+        # Calculate total driving time to break point
+        total_driving_time = deadhead_duration + loaded_duration
+        driving_time_to_break = total_driving_time * distance_ratio
+        
+        # Add pickup time if break is after pickup
+        deadhead_miles = total_distance * (deadhead_duration.total_seconds() / total_driving_time.total_seconds())
+        
+        if break_distance > deadhead_miles:
+            # Break is after pickup, so include pickup time
+            time_to_break = deadhead_duration + timedelta(minutes=pickup_duration) + (driving_time_to_break - deadhead_duration)
+        else:
+            # Break is during deadhead
+            time_to_break = driving_time_to_break
+        
+        break_arrival = start_time + time_to_break
+        break_departure = break_arrival + timedelta(minutes=30)
+        
+        return {
+            'arrival_time': break_arrival,
+            'departure_time': break_departure
+        }
+
+    def _adjust_stop_timings_for_break(self, stops: List[Dict], break_departure_time: datetime) -> None:
+        """
+        Adjust the timing of subsequent stops to account for the 30-minute break.
+        """
+        break_delay = timedelta(minutes=30)
+        
+        for stop in stops:
+            if stop['type'] in ['delivery'] and stop.get('distance_from_origin', 0) > 0:
+                # Only adjust stops that come after the break
+                current_arrival = datetime.fromisoformat(stop['arrival_time'].replace('Z', '+00:00'))
+                if current_arrival > break_departure_time:
+                    new_arrival = current_arrival + break_delay
+                    new_departure = new_arrival + timedelta(minutes=stop['duration_minutes'])
+                    
+                    stop['arrival_time'] = new_arrival.isoformat()
+                    stop['departure_time'] = new_departure.isoformat()
     
 
     def _calculate_leg_stops_with_status(
@@ -1097,16 +1521,32 @@ class RoutePlannerService:
         Save calculated route plan to database
         """
         try:
-            # Create Route object
+            route_geometry = route_data.get('combined_geometry', {})
+            
+            # Extract instructions from legs data
+            route_instructions = []
+            legs_data = route_data.get('legs', [])
+            for leg in legs_data:
+                if 'instructions' in leg:
+                    route_instructions.extend(leg['instructions'])
+            
+            # If legs don't have instructions, try to get from route_data directly
+            if not route_instructions:
+                route_instructions = route_data.get('instructions', [])
+            
+            # Create Route object with correct data
             route = Route.objects.create(
                 trip=trip,
-                route_geometry=route_data.get('geometry', {}),
-                route_instructions=route_data.get('instructions', []),
+                route_geometry=route_geometry,
+                route_instructions=route_instructions,
                 total_distance_meters=int(route_data.get('distance_meters', 0)),
                 total_duration_seconds=int(route_data.get('duration_seconds', 0)),
                 external_route_id=route_data.get('route_id', ''),
-                api_provider=route_data.get('provider', 'openrouteservice')
+                api_provider=route_data.get('provider', 'openrouteservice'),
+                calculated_by=trip.driver 
             )
+            
+            logger.info(f"Route saved with geometry: {bool(route_geometry)} and instructions: {len(route_instructions)} steps")
 
             # Create Stops objects
             stops_created = []

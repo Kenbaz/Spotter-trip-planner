@@ -123,6 +123,11 @@ class Trip(models.Model):
         help_text="Driving time for loaded leg in hours"
     )
 
+    total_on_duty_time = models.DecimalField(
+        max_digits=6, decimal_places=2, null=True, blank=True,
+        help_text="Total on-duty time (driving + pickup/delivery time) in hours"
+    )
+
     estimated_arrival_time = models.DateTimeField(
         null=True, blank=True,
         help_text="Estimated arrival time at the destination"

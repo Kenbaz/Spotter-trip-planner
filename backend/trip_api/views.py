@@ -15,14 +15,14 @@ from .serializers import (
     TripCalculationRequestSerializer, TripCalculationResponseSerializer,
     ELDLogRequestSerializer, ELDLogResponseSerializer,
     GeocodingRequestSerializer, GeocodingResponseSerializer,
-    RouteOptimizationRequestSerializer, RouteOptimizationResponseSerializer, ComplianceReportSerializer, TripCompletionSerializer, CurrentDriverStatusSerializer
+    RouteOptimizationRequestSerializer, RouteOptimizationResponseSerializer, ComplianceReportSerializer, CurrentDriverStatusSerializer
 )
 from users.models import SpotterCompany
 from .services.route_planner import RoutePlannerService
 from .services.hos_calculator import HOSCalculatorService
 from .services.eld_generator import ELDGeneratorService
 from .services.external_apis import ExternalAPIService
-from .services import DriverCycleStatusService
+from .services.DriverCycleStatusService import DriverCycleStatusService
 from users.permissions import IsDriverOrFleetManager, IsActiveDriver
 from users.models import DriverVehicleAssignment    
 
@@ -331,16 +331,6 @@ class TripViewSet(viewsets.ModelViewSet):
                 driver_status = DriverCycleStatusService.get_or_create_current_status(request.user)
                 current_status = DriverCycleStatusService.get_driver_status_for_trip_planning(request.user)
 
-                # Check if driver can start this trip
-                estimated_hours = 14
-                can_start, reason = driver_status.can_start_trip(estimated_hours)
-
-                if not can_start:
-                    return Response({
-                        'success': False,
-                        'error': f'Cannot start trip: {reason}',
-                        'driver_status': current_status
-                    }, status=status.HTTP_400_BAD_REQUEST)
             except Exception as e:
                 logger.warning(f"Could not get driver status for route calculation: {str(e)}")
                 driver_status = None
@@ -383,18 +373,22 @@ class TripViewSet(viewsets.ModelViewSet):
                         optimization_applied = True
                 
                 # save route plan to db
-                route, stops, hos_period = route_planner.save_route_plan(
+                route_planner.save_route_plan(
                     trip,
                     calc_result['route_plan'],
                     calc_result['route_data'],
                 )
 
                 # Generate compliance report
+                print(f"Generated trip planning compliance report for route calculation")
                 hos_calc = HOSCalculatorService()
-                compliance_report = hos_calc.generate_compliance_report(trip)
+                compliance_report = hos_calc.generate_trip_planning_compliance_report(trip)
+                
 
                 # Update trip status and compliance
+                print("Trip status being updated to 'Planned'")
                 trip.status = 'Planned'
+                print(f"Trip {trip.trip_id} status updated to 'Planned'")
                 trip.is_hos_compliant = compliance_report.is_compliant
                 trip.save()
 
@@ -421,10 +415,8 @@ class TripViewSet(viewsets.ModelViewSet):
                 if eld_logs:
                     response_data['eld_logs'] = eld_logs
                 
-                if eld_logs:
-                    response_data['eld_logs'] = eld_logs
-                
                 print(f"Route calculated for trip {trip.trip_id} by driver {request.user.full_name}")
+                print(f"Final compliance status: {compliance_report.is_compliant}")
                 
                 return Response(
                     TripCalculationResponseSerializer(response_data).data,
@@ -541,12 +533,6 @@ class TripViewSet(viewsets.ModelViewSet):
                         optimization_result['route_plan'],
                         optimization_result.get('route_data', {})
                     )
-
-                    # Update compliance
-                    hos_calculator = HOSCalculatorService()
-                    compliance_report = hos_calculator.generate_compliance_report(trip)
-                    trip.is_hos_compliant = compliance_report.is_compliant
-                    trip.save()
                 
                 logger.info(f"Route optimized for trip {trip.trip_id} by driver {request.user.full_name}")
             
@@ -685,7 +671,7 @@ class TripViewSet(viewsets.ModelViewSet):
             
             # Generate compliance report
             hos_calculator = HOSCalculatorService()
-            compliance_report = hos_calculator.generate_compliance_report(trip)
+            compliance_report = hos_calculator.generate_trip_planning_compliance_report(trip)
 
             # Update the generated_by field
             compliance_report.generated_by = request.user

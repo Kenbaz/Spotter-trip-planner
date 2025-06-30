@@ -517,11 +517,28 @@ class DriverCycleStatus(models.Model):
         if self.needs_immediate_break:
             return False, "Must take 30-minute break before starting trip"
         
+        if self.remaining_driving_hours_today <= 0:
+            return False, "No remaining driving hours today - daily reset required"
+        
+        if self.remaining_on_duty_hours_today <= 0:
+            return False, "No remaining on-duty hours today - daily reset required"
+        
+        # For trips longer than remaining daily hours, check if driver can start legally
+        if estimated_trip_hours > self.remaining_on_duty_hours_today:
+            min_hours_to_start = 2.0  # Minimum hours needed to meaningfully start a trip
+            
+            if self.remaining_on_duty_hours_today < min_hours_to_start:
+                return False, f"Need at least {min_hours_to_start} hours remaining to start multi-day trip, but only {self.remaining_on_duty_hours_today:.1f} hours remain today"
+            
+            # Driver can start - trip will continue after daily reset
+            return True, f"Multi-day trip approved - will require daily reset after {self.remaining_on_duty_hours_today:.1f} hours"
+        
+        # Single-day trip validation
         if estimated_trip_hours > self.remaining_driving_hours_today:
-            return False, f"Trip requires {estimated_trip_hours} hours but only {self.remaining_driving_hours_today} hours remain today"
+            return False, f"Trip requires {estimated_trip_hours:.1f} driving hours but only {self.remaining_driving_hours_today:.1f} driving hours remain today"
         
         if estimated_trip_hours > self.remaining_cycle_hours:
-            return False, f"Trip requires {estimated_trip_hours} hours but only {self.remaining_cycle_hours} hours remain in cycle"
+            return False, f"Trip requires {estimated_trip_hours:.1f} hours but only {self.remaining_cycle_hours:.1f} hours remain in cycle"
         
         return True, "Driver can start trip"
 

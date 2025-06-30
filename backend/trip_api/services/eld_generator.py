@@ -1,11 +1,9 @@
 # trip_api/services/eld_generator.py
 
 from datetime import datetime, timedelta
-from typing import List, Dict, Tuple, Optional
-from decimal import Decimal
-import json
+from typing import List, Dict
 from django.utils import timezone
-from ..models import Trip, HOSPeriod, Stops
+from ..models import Trip, HOSPeriod
 
 
 class ELDGeneratorService:

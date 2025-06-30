@@ -176,7 +176,7 @@ class TripCreationSerializer(serializers.ModelSerializer):
         trip = super().create(validated_data)
         
         # Update or create driver cycle status
-        self._record_status_starting_conditions(trip, starting_conditions)
+        self._record_trip_starting_conditions(trip, starting_conditions)
         
         return trip
     

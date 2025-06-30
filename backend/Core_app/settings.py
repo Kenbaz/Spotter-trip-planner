@@ -288,3 +288,44 @@ CACHES = {
 
 SESSION_ENGINE = 'django.contrib.sessions.backends.cache'
 SESSION_CACHE_ALIAS = 'default'
+
+
+# Logging Configuration
+LOGGING = {
+    'version': 1,
+    'disable_existing_loggers': False,
+    'formatters': {
+        'verbose': {
+            'format': '{levelname} {asctime} {module} {message}',
+            'style': '{',
+        },
+    },
+    'handlers': {
+        'console': {
+            'class': 'logging.StreamHandler',
+            'formatter': 'verbose',
+        },
+    },
+    'loggers': {
+        'django': {
+            'handlers': ['console'],
+            'level': 'INFO',
+        },
+        'channels': {
+            'handlers': ['console'],
+            'level': 'DEBUG',
+        },
+        'trip_api.services.hos_calculator': {
+            'handlers': ['console'],
+            'level': 'INFO',
+        },
+        'trip_api.services.route_planner': {
+            'handlers': ['console'],
+            'level': 'INFO',
+        },
+        'trip_api.services.eld_generator': {
+            'handlers': ['console'],
+            'level': 'INFO',
+        },
+    },
+}
