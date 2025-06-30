@@ -5,6 +5,7 @@ import { AuthProvider } from './context/AuthContext';
 import { AppRoutes } from './routes/AppRoutes';
 import { queryClient } from './lib/queryClient';
 import './App.css';
+import { ToastProvider } from './lib/ToastProvider';
 
 
 function App() {
@@ -18,6 +19,7 @@ function App() {
         </AuthProvider>
       </BrowserRouter>
       <ReactQueryDevtools initialIsOpen={false} />
+      <ToastProvider/>
     </QueryClientProvider>
   )
 }

@@ -1,15 +1,21 @@
 import { keepPreviousData, useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { tripService } from "../services/TripService";
 import type {
-    CreateTripRequest,
-    TripCalculationRequest,
-    ELDLogRequest,
-    PaginatedResponse,
-    TripListItem,
-    Trip,
-    ComplianceReport,
-    GeocodingResponse,
-    APIStatusCheckResponse,
+  CreateTripRequest,
+  TripCalculationRequest,
+  ELDLogRequest,
+  PaginatedResponse,
+  TripListItem,
+  Trip,
+  ComplianceReport,
+  GeocodingResponse,
+  APIStatusCheckResponse,
+  CurrentDriverStatusResponse,
+  TripCompletionResponse,
+  DriverStatusUpdateRequest,
+  DriverStatusUpdateResponse,
+  MyTripsResponse,
+  TripCalculationResponse,
 } from "../types";
 
 
@@ -22,6 +28,13 @@ export const tripQueryKeys = {
     compliance: (id: string) => ['trips', 'compliance', id] as const,
 };
 
+
+export const driverQueryKeys = {
+  all: ["driver"] as const,
+  currentStatus: ["driver", "current-status"] as const,
+};
+
+
 export const utilityQueryKeys = {
     apiStatus: ['utilities', 'api-status'] as const,
     geocoding: (address: string) => ['utilities', 'geocoding', address] as const,
@@ -32,9 +45,63 @@ export const utilityQueryKeys = {
 export function useMyTrips(status?: string) {
     return useQuery({
         queryKey: tripQueryKeys.myTrips(status),
-        queryFn: () => tripService.getMyTrips(status),
+        queryFn: (): Promise<MyTripsResponse> => tripService.getMyTrips(status),
         staleTime: 2 * 60 * 1000,
         gcTime: 5 * 60 * 1000,
+    });
+};
+
+// Get current driver HOS status
+export function useCurrentDriverStatus() { 
+    return useQuery({
+        queryKey: driverQueryKeys.currentStatus,
+        queryFn: (): Promise<CurrentDriverStatusResponse> => tripService.getCurrentDriverStatus(),
+        staleTime: 5 * 60 * 1000,
+        refetchInterval: 10 * 60 * 1000,
+        refetchOnWindowFocus: true,
+    });
+};
+
+// Complete a trip
+export function useCompleteTrip() {
+    const queryClient = useQueryClient();
+    
+    return useMutation({
+      mutationFn: (tripId: string): Promise<TripCompletionResponse> => 
+        tripService.completeTrip(tripId),
+      onSuccess: (data, tripId) => {
+        queryClient.invalidateQueries({
+          queryKey: tripQueryKeys.detail(tripId),
+        });
+
+        // Invalidate trip lists to update status/counts
+        queryClient.invalidateQueries({
+          queryKey: tripQueryKeys.myTrips(),
+        });
+
+        queryClient.invalidateQueries({
+          queryKey: driverQueryKeys.currentStatus,
+        });
+
+        // If we have trip data in the response, update the specific trip cache
+        if (data.hours_summary) {
+          queryClient.invalidateQueries({ queryKey: tripQueryKeys.myTrips() });
+        }
+      },
+    });
+};
+
+// Update driver status
+export function useUpdateDriverStatus() {
+    const queryClient = useQueryClient();
+    
+    return useMutation({
+      mutationFn: (updateData: DriverStatusUpdateRequest): Promise<DriverStatusUpdateResponse> => 
+        tripService.updateDriverStatus(updateData),
+      onSuccess: () => {
+        // Invalidate driver status queries
+        queryClient.invalidateQueries({ queryKey: driverQueryKeys.currentStatus });
+      },
     });
 };
 
@@ -101,13 +168,14 @@ export function useCreateTrip() {
     return useMutation({
         mutationFn: (tripData: CreateTripRequest) => tripService.createTrip(tripData),
         onSuccess: (data) => {
-            queryClient.invalidateQueries({ queryKey: ["trips", "list"] });
-            queryClient.invalidateQueries({ queryKey: ["trips", "my-trips"] });
-            
-            queryClient.setQueryData(
-                tripQueryKeys.detail(data.trip.trip_id),
-                { success: true, trip: data.trip }
-            );
+          // Set the new trip in cache immediately
+          queryClient.setQueryData(tripQueryKeys.detail(data.trip.trip_id), {
+            success: true,
+            trip: data.trip,
+          });
+
+          // Invalidate the trips list to ensure it reflects the new trip
+          queryClient.invalidateQueries({ queryKey: tripQueryKeys.myTrips() });
         },
     });
 };
@@ -128,8 +196,7 @@ export function useUpdateTrip() {
                 { success: true, trip: data.trip }
             );
 
-            queryClient.invalidateQueries({ queryKey: ["trips", "list"] });
-            queryClient.invalidateQueries({ queryKey: ["trips", "my-trips"] });
+            queryClient.invalidateQueries({ queryKey: tripQueryKeys.myTrips() });
         },
     });
 };
@@ -143,10 +210,16 @@ export function useDeleteTrip() {
       onSuccess: (_, tripId) => {
         // Remove from cache
         queryClient.removeQueries({ queryKey: tripQueryKeys.detail(tripId) });
-        
-        // Invalidate lists
-        queryClient.invalidateQueries({ queryKey: ["trips", "list"] });
-        queryClient.invalidateQueries({ queryKey: ["trips", "my-trips"] });
+
+        // Remove compliance data for deleted trip
+        queryClient.removeQueries({
+          queryKey: tripQueryKeys.compliance(tripId),
+        });
+
+        // Update trip lists
+        queryClient.invalidateQueries({
+          queryKey: tripQueryKeys.myTrips(),
+        });
       },
     });
 };
@@ -162,26 +235,29 @@ export function useCalculateRoute() {
         }: {
             tripId: string;
             options?: TripCalculationRequest;
-        }) => tripService.calculateRoute(tripId, options),
+        }): Promise<TripCalculationResponse> => tripService.calculateRoute(tripId, options),
         onSuccess: (data, variables) => {
             if (data.success) {
-              // Invalidate trip details to refetch updated trip data
+              // Invalidate specific trip details to refetch updated trip data
               queryClient.invalidateQueries({
                 queryKey: tripQueryKeys.detail(variables.tripId),
               });
 
-              // Invalidate compliance data to ensure it reflects the latest trip state
+              // Only invalidate compliance for this trip
               queryClient.invalidateQueries({
                 queryKey: tripQueryKeys.compliance(variables.tripId),
               });
 
-              // Invalidate trip list to ensure it reflects any changes
+              // Only invalidate trip lists (for status updates)
               queryClient.invalidateQueries({
-                queryKey: ["trips", "list"],
+                queryKey: tripQueryKeys.myTrips(),
               });
-              queryClient.invalidateQueries({
-                queryKey: ["trips", "my-trips"],
-              });
+
+              if (data.driver_status_impact) {
+                queryClient.invalidateQueries({
+                  queryKey: driverQueryKeys.currentStatus,
+                });
+              }
             }
         },
     });
@@ -210,8 +286,14 @@ export function useOptimizeRoute() {
           queryClient.invalidateQueries({ 
             queryKey: tripQueryKeys.detail(variables.tripId) 
           });
-          queryClient.invalidateQueries({ 
-            queryKey: tripQueryKeys.compliance(variables.tripId) 
+            
+          queryClient.invalidateQueries({
+            queryKey: tripQueryKeys.compliance(variables.tripId),
+          });
+
+          // Only invalidate trip lists (for status updates)
+          queryClient.invalidateQueries({
+            queryKey: tripQueryKeys.myTrips(),
           });
         }
       },

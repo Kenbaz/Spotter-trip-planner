@@ -14,6 +14,11 @@ import type {
     TestRouteResponse,
     APIStatusCheckResponse,
     PaginatedResponse,
+    CurrentDriverStatusResponse,
+    TripCompletionResponse,
+    DriverStatusUpdateRequest,
+    DriverStatusUpdateResponse,
+    MyTripsResponse
 } from "../types";
 
 
@@ -26,7 +31,7 @@ interface ServiceError {
 
 
 class TripService {
-  private readonly BASE_URL = "/api/trips";
+  private readonly BASE_URL = "/api/trips/";
 
   private handleError(error: unknown, context: string): never {
     console.error(`TripService Error in ${context}:`, error);
@@ -110,19 +115,19 @@ class TripService {
   }
 
   // Get user's trips
-  async getMyTrips(status?: string): Promise<{
-    success: boolean;
-    trips: TripListItem[];
-    count: number;
-  }> {
+  async getMyTrips(status?: string): Promise<MyTripsResponse> {
     try {
       const params = status ? { status } : undefined;
-      const response = await apiClient.get(`${this.BASE_URL}/my_trips/`, {
+      const response = await apiClient.get(`${this.BASE_URL}my_trips/`, {
         params,
       });
 
       if (!response.data) {
         throw new Error("No response data received");
+      }
+
+      if (typeof response.data.success === "boolean") {
+        return response.data;
       }
 
       if (response.data.results && Array.isArray(response.data.results)) {
@@ -133,16 +138,12 @@ class TripService {
         };
       }
 
-      if (typeof response.data.success === "boolean") {
-        return response.data;
-      }
-
       console.error("Unexpected response format:", response.data);
       throw new Error("Invalid response data format");
     } catch (error) {
       this.handleError(error, "Get my trips");
     }
-    };
+  }
 
   // Get trip details
   async getTripDetails(tripId: string): Promise<{
@@ -154,7 +155,7 @@ class TripService {
         throw new Error("Trip ID is required");
       }
 
-      const response = await apiClient.get(`${this.BASE_URL}/${tripId}/`);
+      const response = await apiClient.get(`${this.BASE_URL}${tripId}/`);
 
       if (!response.data || typeof response.data.success !== "boolean") {
         throw new Error("Invalid response data");
@@ -220,7 +221,7 @@ class TripService {
       }
 
       const response = await apiClient.patch(
-        `${this.BASE_URL}/${tripId}/`,
+        `${this.BASE_URL}${tripId}/`,
         tripData
       );
 
@@ -244,7 +245,7 @@ class TripService {
         throw new Error("Trip ID is required");
       }
 
-      const response = await apiClient.delete(`${this.BASE_URL}/${tripId}/`);
+      const response = await apiClient.delete(`${this.BASE_URL}${tripId}/`);
 
       if (!response.data || typeof response.data.success !== "boolean") {
         throw new Error("Invalid response data");
@@ -267,7 +268,7 @@ class TripService {
       }
 
       const response = await apiClient.post(
-        `${this.BASE_URL}/${tripId}/calculate_route/`,
+        `${this.BASE_URL}${tripId}/calculate_route/`,
         options
       );
 
@@ -297,7 +298,7 @@ class TripService {
       }
 
       const response = await apiClient.post(
-        `${this.BASE_URL}/${tripId}/optimize_route/`,
+        `${this.BASE_URL}${tripId}/optimize_route/`,
         options
       );
 
@@ -322,7 +323,7 @@ class TripService {
       }
 
       const response = await apiClient.post(
-        `${this.BASE_URL}/${tripId}/generate_eld_logs/`,
+        `${this.BASE_URL}${tripId}/generate_eld_logs/`,
         options
       );
 
@@ -347,7 +348,7 @@ class TripService {
       }
 
       const response = await apiClient.get(
-        `${this.BASE_URL}/${tripId}/compliance_report/`
+        `${this.BASE_URL}${tripId}/compliance_report/`
       );
 
       if (!response.data || typeof response.data.success !== "boolean") {
@@ -466,6 +467,65 @@ class TripService {
       return response.data;
     } catch (error) {
       this.handleError(error, "Test route calculation");
+    }
+  }
+
+  async getCurrentDriverStatus(): Promise<CurrentDriverStatusResponse> {
+    try {
+      const response = await apiClient.get(
+        `${this.BASE_URL}current_driver_status/`
+      );
+
+      if (!response.data || typeof response.data.success !== "boolean") {
+        throw new Error("Invalid response data");
+      }
+
+      return response.data;
+    } catch (error) {
+      this.handleError(error, "Get current driver status");
+    }
+  }
+
+  async completeTrip(tripId: string): Promise<TripCompletionResponse> {
+    try {
+      if (!tripId?.trim()) {
+        throw new Error("Trip ID is required");
+      }
+
+      const response = await apiClient.post(
+        `${this.BASE_URL}${tripId}/complete_trip/`
+      );
+
+      if (!response.data || typeof response.data.success !== "boolean") {
+        throw new Error("Invalid response data");
+      }
+
+      return response.data;
+    } catch (error) {
+      this.handleError(error, "Complete trip");
+    }
+  }
+
+  async updateDriverStatus(
+    updateData: DriverStatusUpdateRequest
+  ): Promise<DriverStatusUpdateResponse> {
+    try {
+      if (!updateData.current_duty_status) {
+        throw new Error("Current duty status is required");
+      }
+
+      const response = await apiClient.patch(
+        `${this.BASE_URL}update_driver_status/`,
+        updateData
+      );
+
+      if (!response.data || typeof response.data.success !== "boolean") {
+        throw new Error("Invalid response data");
+      }
+
+      return response.data;
+    } catch (error) {
+      this.handleError(error, "Update driver status");
     }
   }
 

@@ -1,3 +1,5 @@
+import type { LatLngExpression } from "leaflet";
+
 // User and auth types
 export interface User {
   id: number;
@@ -80,6 +82,14 @@ export interface Trip {
   delivery_longitude: number;
 
   departure_datetime: string;
+  completed_at?: string;
+
+  starting_cycle_hours?: number;
+  starting_driving_hours?: number;
+  starting_on_duty_hours?: number;
+  starting_duty_status?: string;
+
+  hos_updated: boolean;
 
   total_distance_miles?: number;
   deadhead_distance_miles?: number;
@@ -184,6 +194,32 @@ export interface TripListItem {
   created_at: string;
 }
 
+export interface CurrentDriverStatus {
+  total_cycle_hours: number;
+  today_driving_hours: number;
+  today_on_duty_hours: number;
+  current_duty_status:
+    | "off_duty"
+    | "sleeper_berth"
+    | "driving"
+    | "on_duty_not_driving";
+  current_status_start: string;
+  last_30min_break_end?: string;
+  today_date: string;
+  // Calculated fields
+  remaining_cycle_hours: number;
+  remaining_driving_hours_today: number;
+  remaining_on_duty_hours_today: number;
+  needs_immediate_break: boolean;
+  compliance_warnings: ComplianceWarning[];
+}
+
+export interface CurrentDriverStatusResponse {
+  success: boolean;
+  current_status: CurrentDriverStatus;
+  last_updated: string;
+}
+
 export interface CreateTripRequest {
   current_address: string;
   current_latitude: number;
@@ -202,16 +238,57 @@ export interface CreateTripRequest {
   pickup_duration_minutes?: number;
   delivery_duration_minutes?: number;
 
-  current_cycle_hours_used: number;
-  hours_driven_today: number;
-  hours_on_duty_today: number;
+  trip_start_cycle_hours: number;
+  trip_start_driving_hours: number;
+  trip_start_on_duty_hours: number;
+  trip_start_duty_status:
+    | "off_duty"
+    | "sleeper_berth"
+    | "driving"
+    | "on_duty_not_driving";
+  trip_start_status_time: string;
+  trip_start_last_break?: string;
+}
+
+export interface TripCompletionResponse {
+  success: boolean;
+  message: string;
+  hours_summary: {
+    driving_hours: number;
+    on_duty_hours: number;
+    started_with_cycle_hours: number;
+    started_with_driving_hours: number;
+    started_with_on_duty_hours: number;
+  };
+  updated_driver_status: CurrentDriverStatus;
+}
+
+export interface DriverStatusFormData {
+  total_cycle_hours: number;
+  today_driving_hours: number;
+  today_on_duty_hours: number;
   current_duty_status:
     | "off_duty"
     | "sleeper_berth"
     | "driving"
     | "on_duty_not_driving";
-  current_status_start_time: string;
-  last_break_end_time?: string;
+  current_status_start: string;
+  last_30min_break_end?: string;
+}
+
+export interface DriverStatusUpdateRequest {
+  current_duty_status:
+    | "off_duty"
+    | "sleeper_berth"
+    | "driving"
+    | "on_duty_not_driving";
+  current_status_start?: string;
+}
+
+export interface DriverStatusUpdateResponse {
+  success: boolean;
+  message: string;
+  current_status: CurrentDriverStatus;
 }
 
 // Route and Stop Types
@@ -361,8 +438,10 @@ export interface AddressSuggestion {
 }
 
 export interface RouteGeometry {
-  type: "LineString";
-  coordinates: number[][];
+  type: "LineString" | "combined_polylines";
+  coordinates?: number[][];
+  loaded_polyline?: string;
+  deadhead_polyline?: string;
 }
 
 export interface RouteInstruction { 
@@ -445,7 +524,11 @@ export interface RoutePlanStop {
     | "fuel"
     | "mandatory_break"
     | "daily_reset"
-    | "fuel_and_break";
+    | "fuel_and_break"
+    | "required_break"
+    | "fuel_stop"
+    | "rest_break"
+    | "sleeper_berth";
   address: string;
   latitude: number;
   longitude: number;
@@ -658,9 +741,16 @@ export interface TripCalculationResponse {
   route_data: RouteData;
   optimization_applied: boolean;
   message: string;
+  driver_status_impact?: CurrentDriverStatus;
+  eld_logs?: ELDLogResponse;
   error?: string;
-  details?: string;
-  current_status_considered: boolean;
+}
+
+export interface MyTripsResponse {
+  success: boolean;
+  trips: TripListItem[];
+  count: number;
+  driver_status?: CurrentDriverStatus;
 }
 
 export interface ELDLogResponse {
@@ -726,4 +816,49 @@ export interface APIStatusCheckResponse {
   success: boolean;
   api_status: APIStatusResponse;
   timestamp: string;
+}
+
+export interface DriverCycleFormData {
+  current_cycle_hours_used: number;
+  hours_driven_today: number;
+  hours_on_duty_today: number;
+  current_duty_status:
+    | "off_duty"
+    | "sleeper_berth"
+    | "driving"
+    | "on_duty_not_driving";
+  current_status_start_time: string;
+  last_break_end_time?: string;
+}
+
+export interface TripSettings {
+  departure_datetime: string;
+  max_fuel_distance_miles: number;
+  pickup_duration_minutes: number;
+  delivery_duration_minutes: number;
+}
+
+export interface ExpectedBreak {
+  type: "30_minute" | "10_hour" | "34_hour";
+  reason: string;
+  estimatedTime: string;
+  isRequired: boolean;
+}
+
+export interface GeolocationOptions {
+  enableHighAccuracy?: boolean;
+  timeout?: number;
+  maximumAge?: number;
+}
+
+export interface GeolocationResult {
+  coordinates: LatLngExpression;
+  accuracy: number;
+  timestamp: number;
+}
+
+export interface RouteCoordinate {
+  latitude: number;
+  longitude: number;
+  elevation?: number;
 }

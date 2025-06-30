@@ -22,7 +22,9 @@ import {
   Edit,
   Play,
   Square,
+  Map,
   Calculator,
+  Navigation,
   RefreshCw,
   AlertCircle,
   Trash2,
@@ -36,9 +38,13 @@ import {
 import { useTripCalculation } from "../hooks/useTripCalculation";
 import { useELDLogs } from "../hooks/useELDLogs";
 import { ELDLogViewer } from "../components/ELDLogs/ELDLogViewer";
+import { RouteMap } from "../components/Maps/RouteMap";
+import { useMap } from "../hooks/useMap";
+import type { RoutePlanStop } from "../types";
+import type { LatLngExpression } from "leaflet";
 
 
-type TabType = "overview" | "stops" | "hos" | "compliance" | "eld_logs";
+type TabType = "overview" | "map" | "stops" | "hos" | "compliance" | "eld_logs";
 
 export function TripDetailPage() {
   const { tripId } = useParams<{ tripId: string }>();
@@ -55,6 +61,8 @@ export function TripDetailPage() {
 
   const { data: complianceResponse, isLoading: isComplianceLoading } =
     useGetTripComplianceReport(tripId);
+  
+  console.log('complianceResponse:', complianceResponse);
 
   const deleteTrip = useDeleteTrip();
 
@@ -92,7 +100,17 @@ export function TripDetailPage() {
   });
 
   const trip = tripResponse?.trip;
+  console.log("Trip Data:", trip);
   const complianceReport = complianceResponse?.compliance_report;
+
+  const {
+    routeCoordinates,
+    routeStops,
+    // userLocation,
+    // getCurrentUserLocation,
+    // hasRoute
+  } = useMap({ trip })
+  
 
   const getStatusBadge = (status: string) => {
     const baseClasses =
@@ -190,8 +208,30 @@ export function TripDetailPage() {
     }
   };
 
+  const handleStopClick = (stop: RoutePlanStop) => {
+    // Show stop details or navigate to stop tab
+    setActiveTab("stops");
+
+    // Optional: scroll to the specific stop in the stops tab
+    setTimeout(() => {
+      const stopElement = document.getElementById(
+        `stop-${stop.address.replace(/\s+/g, "-")}`
+      );
+      if (stopElement) {
+        stopElement.scrollIntoView({ behavior: "smooth", block: "center" });
+      }
+    }, 100);
+  };
+
+  // Add this handler for map clicks (optional - for future route modification):
+  const handleMapClick = (coordinates: LatLngExpression) => {
+    console.log("Map clicked at:", coordinates);
+    // Future: Allow route modification by clicking on map
+  };
+
   const tabs = [
     { id: "overview", label: "Overview", icon: Route },
+    { id: "map", label: "Map", icon: Map },
     { id: "stops", label: "Stops", icon: MapPin },
     { id: "hos", label: "HOS Periods", icon: Clock },
     { id: "compliance", label: "Compliance", icon: CheckCircle },
@@ -534,14 +574,14 @@ export function TripDetailPage() {
               <CardContent className="space-y-4">
                 <div className="grid grid-cols-2 gap-4 text-sm">
                   <div>
-                    <p className="text-gray-600">Departure</p>
-                    <p className="font-medium">
+                    <p className="text-gray-700">Departure</p>
+                    <p className="font-medium text-gray-700">
                       {formatDateTime(trip.departure_datetime)}
                     </p>
                   </div>
                   <div>
                     <p className="text-gray-600">Estimated Arrival</p>
-                    <p className="font-medium">
+                    <p className="font-medium text-gray-700">
                       {trip.estimated_arrival_time
                         ? formatDateTime(trip.estimated_arrival_time)
                         : "Not calculated"}
@@ -549,7 +589,7 @@ export function TripDetailPage() {
                   </div>
                   <div>
                     <p className="text-gray-600">Total Distance</p>
-                    <p className="font-medium">
+                    <p className="font-medium text-gray-700">
                       {trip.total_distance_miles
                         ? `${trip.total_distance_miles} miles`
                         : "Not calculated"}
@@ -557,7 +597,7 @@ export function TripDetailPage() {
                   </div>
                   <div>
                     <p className="text-gray-600">Driving Time</p>
-                    <p className="font-medium">
+                    <p className="font-medium text-gray-700">
                       {trip.total_driving_time
                         ? `${trip.total_driving_time} hours`
                         : "Not calculated"}
@@ -565,11 +605,15 @@ export function TripDetailPage() {
                   </div>
                   <div>
                     <p className="text-gray-600">Driver</p>
-                    <p className="font-medium">{trip.driver_name}</p>
+                    <p className="font-medium text-gray-700">
+                      {trip.driver_name}
+                    </p>
                   </div>
                   <div>
                     <p className="text-gray-600">Total Stops</p>
-                    <p className="font-medium">{trip.stops.length}</p>
+                    <p className="font-medium text-gray-700">
+                      {trip.stops.length}
+                    </p>
                   </div>
                 </div>
               </CardContent>
@@ -596,7 +640,9 @@ export function TripDetailPage() {
                         <div className="w-3 h-3 bg-blue-500 rounded-full"></div>
                       </div>
                       <div className="flex-1">
-                        <p className="font-medium">{trip.current_address}</p>
+                        <p className="font-medium text-gray-500">
+                          {trip.current_address}
+                        </p>
                         <p className="text-sm text-gray-600">
                           Current Location
                         </p>
@@ -637,7 +683,9 @@ export function TripDetailPage() {
                         <div className="w-3 h-3 bg-green-500 rounded-full"></div>
                       </div>
                       <div className="flex-1">
-                        <p className="font-medium">{trip.pickup_address}</p>
+                        <p className="font-medium text-gray-500">
+                          {trip.pickup_address}
+                        </p>
                         <p className="text-sm text-gray-600">Pickup Location</p>
                       </div>
                       {trip.loaded_distance_miles && (
@@ -660,7 +708,7 @@ export function TripDetailPage() {
                             <div className="w-2 h-2 bg-gray-400 rounded-full"></div>
                           </div>
                           <div>
-                            <p className="font-medium text-sm">
+                            <p className="font-medium text-gray-500 text-sm">
                               {stop.address}
                             </p>
                             <p className="text-xs text-gray-600">
@@ -676,7 +724,9 @@ export function TripDetailPage() {
                         <div className="w-3 h-3 bg-red-500 rounded-full"></div>
                       </div>
                       <div>
-                        <p className="font-medium">{trip.delivery_address}</p>
+                        <p className="font-medium text-gray-500">
+                          {trip.delivery_address}
+                        </p>
                         <p className="text-sm text-gray-600">
                           Delivery Location
                         </p>
@@ -686,6 +736,283 @@ export function TripDetailPage() {
                 )}
               </CardContent>
             </Card>
+          </div>
+        )}
+
+        {activeTab === "map" && (
+          <div className="space-y-6">
+            {/* Map Container */}
+            <Card>
+              <CardHeader>
+                <div className="flex items-center justify-between">
+                  <CardTitle>Route Map</CardTitle>
+                  <div className="flex items-center space-x-2">
+                    {trip.total_distance_miles && (
+                      <span className="text-sm text-gray-600">
+                        Total Distance: {trip.total_distance_miles} miles
+                      </span>
+                    )}
+                    {trip.is_hos_compliant ? (
+                      <span className="inline-flex items-center px-2 py-1 rounded-full text-xs font-medium bg-green-100 text-green-800">
+                        <CheckCircle className="w-3 h-3 mr-1" />
+                        HOS Compliant
+                      </span>
+                    ) : (
+                      <span className="inline-flex items-center px-2 py-1 rounded-full text-xs font-medium bg-red-100 text-red-800">
+                        <AlertTriangle className="w-3 h-3 mr-1" />
+                        Non-Compliant
+                      </span>
+                    )}
+                  </div>
+                </div>
+              </CardHeader>
+              <CardContent className="p-0">
+                <div className="h-96 lg:h-[500px]">
+                  <RouteMap
+                    trip={trip}
+                    routeStops={routeStops}
+                    routeCoordinates={routeCoordinates}
+                    onStopClick={handleStopClick}
+                    onMapClick={handleMapClick}
+                    className="h-full"
+                  />
+                </div>
+              </CardContent>
+            </Card>
+
+            {/* Map Information Cards */}
+            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+              {/* Route Summary */}
+              <Card>
+                <CardHeader>
+                  <CardTitle className="text-lg">Route Summary</CardTitle>
+                </CardHeader>
+                <CardContent>
+                  <div className="space-y-3 text-sm">
+                    <div className="flex justify-between">
+                      <span className="text-gray-600">Total Stops:</span>
+                      <span className="font-medium text-gray-700">
+                        {routeStops.length}
+                      </span>
+                    </div>
+                    <div className="flex justify-between">
+                      <span className="text-gray-600">Driving Time:</span>
+                      <span className="font-medium text-gray-700">
+                        {trip.total_driving_time
+                          ? `${trip.total_driving_time}h`
+                          : "TBD"}
+                      </span>
+                    </div>
+                    <div className="flex justify-between">
+                      <span className="text-gray-600">Total Time:</span>
+                      <span className="font-medium text-gray-700">
+                        {trip.estimated_arrival_time && trip.departure_datetime
+                          ? `${Math.round(
+                              (new Date(trip.estimated_arrival_time).getTime() -
+                                new Date(trip.departure_datetime).getTime()) /
+                                (1000 * 60 * 60)
+                            )}h`
+                          : "TBD"}
+                      </span>
+                    </div>
+                    <div className="flex justify-between">
+                      <span className="text-gray-600">Fuel Stops:</span>
+                      <span className="font-medium text-gray-700">
+                        {
+                          routeStops.filter((s) => s.type === "fuel_stop")
+                            .length
+                        }
+                      </span>
+                    </div>
+                  </div>
+                </CardContent>
+              </Card>
+
+              {/* Break Summary */}
+              <Card>
+                <CardHeader>
+                  <CardTitle className="text-lg">HOS Breaks</CardTitle>
+                </CardHeader>
+                <CardContent>
+                  <div className="space-y-3 text-sm">
+                    <div className="flex justify-between">
+                      <span className="text-gray-600">Required Breaks:</span>
+                      <span className="font-medium text-gray-700">
+                        {
+                          routeStops.filter((s) => s.type === "required_break")
+                            .length
+                        }
+                      </span>
+                    </div>
+                    <div className="flex justify-between">
+                      <span className="text-gray-600">Rest Periods:</span>
+                      <span className="font-medium text-gray-700">
+                        {
+                          routeStops.filter((s) => s.type === "rest_break")
+                            .length
+                        }
+                      </span>
+                    </div>
+                    <div className="flex justify-between">
+                      <span className="text-gray-600">Sleeper Berth:</span>
+                      <span className="font-medium text-gray-700">
+                        {
+                          routeStops.filter((s) => s.type === "sleeper_berth")
+                            .length
+                        }
+                      </span>
+                    </div>
+                    <div className="pt-2 border-t border-gray-200">
+                      <div className="flex justify-between">
+                        <span className="text-gray-600">Compliance:</span>
+                        <span
+                          className={`font-medium ${
+                            trip.is_hos_compliant
+                              ? "text-green-600"
+                              : "text-red-600"
+                          }`}
+                        >
+                          {trip.is_hos_compliant ? "Compliant" : "Violations"}
+                        </span>
+                      </div>
+                    </div>
+                  </div>
+                </CardContent>
+              </Card>
+
+              {/* Navigation Actions */}
+              <Card>
+                <CardHeader>
+                  <CardTitle className="text-lg">Navigation</CardTitle>
+                </CardHeader>
+                <CardContent>
+                  <div className="space-y-3">
+                    <Button
+                      variant="primary"
+                      size="sm"
+                      className="w-full"
+                      leftIcon={<Navigation className="w-4 h-4" />}
+                      onClick={() => {
+                        if (navigator.geolocation) {
+                          navigator.geolocation.getCurrentPosition(
+                            (position) => {
+                              const { latitude, longitude } = position.coords;
+                              const url = `https://maps.google.com/maps?daddr=${trip.pickup_latitude},${trip.pickup_longitude}&saddr=${latitude},${longitude}`;
+                              window.open(url, "_blank");
+                            }
+                          );
+                        }
+                      }}
+                    >
+                      Start Navigation
+                    </Button>
+
+                    <Button
+                      variant="ghost"
+                      size="sm"
+                      className="w-full"
+                      leftIcon={<Download className="w-4 h-4" />}
+                      onClick={() => {
+                        // Export route coordinates or open in mapping app
+                        const coords = routeCoordinates
+                          .map((coord) =>
+                            Array.isArray(coord)
+                              ? `${coord[0]},${coord[1]}`
+                              : `${coord.lat},${coord.lng}`
+                          )
+                          .join("|");
+
+                        const url = `https://maps.google.com/maps?waypoints=${coords}`;
+                        window.open(url, "_blank");
+                      }}
+                    >
+                      Export Route
+                    </Button>
+
+                    <Button
+                      variant="ghost"
+                      size="sm"
+                      className="w-full"
+                      leftIcon={<Settings className="w-4 h-4" />}
+                      onClick={() => setActiveTab("stops")}
+                    >
+                      Modify Stops
+                    </Button>
+                  </div>
+                </CardContent>
+              </Card>
+            </div>
+
+            {/* Quick Stop Actions */}
+            {routeStops.length > 0 && (
+              <Card>
+                <CardHeader>
+                  <CardTitle className="text-lg">Quick Stop Actions</CardTitle>
+                </CardHeader>
+                <CardContent>
+                  <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-2">
+                    {routeStops.slice(0, 8).map((stop, index) => {
+                      const isBreakStop = [
+                        "required_break",
+                        "rest_break",
+                        "sleeper_berth",
+                      ].includes(stop.type);
+                      const isFuelStop = stop.type === "fuel_stop";
+
+                      return (
+                        <Button
+                          key={index}
+                          variant="secondary"
+                          size="sm"
+                          className={`text-left justify-start ${
+                            isBreakStop
+                              ? "border-yellow-200 hover:bg-yellow-50"
+                              : isFuelStop
+                              ? "border-purple-200 hover:bg-purple-50"
+                              : "border-gray-200 hover:bg-gray-50"
+                          }`}
+                          onClick={() => handleStopClick(stop)}
+                        >
+                          <div className="flex items-center space-x-2">
+                            <div
+                              className={`w-2 h-2 rounded-full ${
+                                isBreakStop
+                                  ? "bg-yellow-500"
+                                  : isFuelStop
+                                  ? "bg-purple-500"
+                                  : "bg-blue-500"
+                              }`}
+                            />
+                            <div className="min-w-0 flex-1">
+                              <p className="text-xs font-medium truncate">
+                                {stop.type.replace("_", " ").toUpperCase()}
+                              </p>
+                              <p className="text-xs text-gray-500 truncate">
+                                {stop.address.length > 20
+                                  ? `${stop.address.substring(0, 20)}...`
+                                  : stop.address}
+                              </p>
+                            </div>
+                          </div>
+                        </Button>
+                      );
+                    })}
+                  </div>
+
+                  {routeStops.length > 8 && (
+                    <div className="mt-3 text-center">
+                      <Button
+                        variant="ghost"
+                        size="sm"
+                        onClick={() => setActiveTab("stops")}
+                      >
+                        View All {routeStops.length} Stops
+                      </Button>
+                    </div>
+                  )}
+                </CardContent>
+              </Card>
+            )}
           </div>
         )}
 
@@ -916,7 +1243,7 @@ export function TripDetailPage() {
                         <span className="text-sm text-gray-600">
                           Total Driving Hours
                         </span>
-                        <span className="font-medium">
+                        <span className="font-medium text-gray-700">
                           {trip.total_driving_time
                             ? `${trip.total_driving_time} / 11 hours`
                             : "Not calculated"}
@@ -926,7 +1253,7 @@ export function TripDetailPage() {
                         <span className="text-sm text-gray-600">
                           Total On-Duty Hours
                         </span>
-                        <span className="font-medium">
+                        <span className="font-medium text-gray-700">
                           {complianceReport?.total_on_duty_hours
                             ? `${complianceReport.total_on_duty_hours} / 14 hours`
                             : "Not calculated"}
@@ -936,7 +1263,7 @@ export function TripDetailPage() {
                         <span className="text-sm text-gray-600">
                           Required Breaks
                         </span>
-                        <span className="font-medium">
+                        <span className="font-medium text-gray-700">
                           {complianceReport
                             ? `${complianceReport.scheduled_30min_breaks} / ${complianceReport.required_30min_breaks}`
                             : "Not calculated"}

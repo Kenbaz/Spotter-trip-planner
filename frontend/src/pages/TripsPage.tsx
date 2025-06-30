@@ -364,21 +364,25 @@ export function TripsPage() {
                                   → {trip.delivery_address}
                                 </p>
                                 <div className="flex items-center space-x-4 text-sm text-gray-500 mt-1">
-                                  <span>
+                                  <span className="text-gray-900">
                                     Departure: {departure.date} at{" "}
                                     {departure.time}
                                   </span>
                                   {trip.total_distance_miles && (
-                                    <span>
+                                    <span className="text-gray-900">
                                       {trip.total_distance_miles} miles
                                     </span>
                                   )}
                                   {trip.total_driving_time && (
-                                    <span>{trip.total_driving_time} hours</span>
+                                    <span className="text-gray-900">
+                                      {trip.total_driving_time} hours
+                                    </span>
                                   )}
-                                  <span>{trip.stops_count} stops</span>
+                                  <span className="text-gray-900">
+                                    {trip.stops_count} stops
+                                  </span>
                                   {estimatedArrival && (
-                                    <span>
+                                    <span className="text-gray-900">
                                       ETA: {estimatedArrival.date} at{" "}
                                       {estimatedArrival.time}
                                     </span>

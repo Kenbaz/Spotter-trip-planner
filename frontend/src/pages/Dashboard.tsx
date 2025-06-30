@@ -1,6 +1,9 @@
+// pages/Dashboard.tsx - Complete implementation
+
 import { useMemo } from "react";
 import { useAuth } from "../hooks/useAuth";
-import { useMyTrips } from "../hooks/useTripQueries";
+import { useMyTrips, useCurrentDriverStatus } from "../hooks/useTripQueries";
+import { DriverStatusCard } from "../components/UI/DriverStatusCard";
 import { Layout } from "../components/Layout/Layout";
 import {
   Card,
@@ -25,13 +28,13 @@ import { Link } from "react-router-dom";
 import type { TripListItem } from "../types";
 
 interface DashboardStats {
-  drivingHours: number;
-  maxDrivingHours: number;
-  onDutyHours: number;
-  maxOnDutyHours: number;
-  isCompliant: boolean;
-  nextBreakRequired: string | null;
   activeTripId: string | null;
+  totalTrips: number;
+  completedToday: number;
+  inProgress: number;
+  planned: number;
+  hoursWorkedToday: number;
+  nextBreakTime: string | null;
 }
 
 interface TripCounts {
@@ -45,20 +48,29 @@ interface TripCounts {
 export function DashboardPage() {
   const { user } = useAuth();
 
-  // Fetch trips data
+  // Fetch trips and driver status
   const {
     data: tripsResponse,
-    isLoading,
-    isError,
-    error,
-    refetch,
+    isLoading: tripsLoading,
+    isError: tripsError,
+    error: tripsErrorMsg,
+    refetch: refetchTrips,
   } = useMyTrips();
 
-  
+  const {
+    data: statusResponse,
+    isLoading: statusLoading,
+    isError: statusError,
+    refetch: refetchStatus,
+  } = useCurrentDriverStatus();
+
   const trips = useMemo(() => {
     return tripsResponse?.trips || [];
   }, [tripsResponse?.trips]);
 
+  const driverStatus = useMemo(() => {
+    return tripsResponse?.driver_status || statusResponse?.current_status;
+  }, [tripsResponse?.driver_status, statusResponse?.current_status]);
 
   // Calculate dashboard statistics
   const dashboardStats = useMemo((): DashboardStats => {
@@ -67,30 +79,29 @@ export function DashboardPage() {
       (trip: TripListItem) => trip.status === "in_progress"
     );
 
-    // For demo purposes, calculate approximate stats
-    // In a real app, this would come from actual HOS tracking data
+    // Count trips by status
+    const today = new Date().toDateString();
     const completedToday = trips.filter((trip: TripListItem) => {
       const tripDate = new Date(trip.departure_datetime).toDateString();
-      const today = new Date().toDateString();
       return tripDate === today && trip.status === "completed";
-    });
+    }).length;
 
-    const totalDrivingTime = completedToday.reduce((total, trip) => {
-      return total + (trip.total_driving_time || 0);
-    }, 0);
+    const inProgress = trips.filter(
+      (trip) => trip.status === "in_progress"
+    ).length;
+    const planned = trips.filter((trip) => trip.status === "planned").length;
 
-    const totalOnDutyTime = totalDrivingTime * 1.3; // Approximate on-duty time
-
-    const isCompliant = totalDrivingTime <= 11 && totalOnDutyTime <= 14;
-
-    // Calculate next break requirement (simplified)
-    let nextBreakRequired = null;
-    if (activeTrip && totalDrivingTime > 0) {
-      const hoursUntilBreak = Math.max(0, 8 - (totalDrivingTime % 8));
+    // Calculate next break time if needed
+    let nextBreakTime = null;
+    if (driverStatus && driverStatus.current_duty_status === "driving") {
+      const hoursUntilBreak = Math.max(
+        0,
+        8 - (driverStatus.today_driving_hours % 8)
+      );
       if (hoursUntilBreak < 2) {
         const breakTime = new Date();
         breakTime.setHours(breakTime.getHours() + hoursUntilBreak);
-        nextBreakRequired = breakTime.toLocaleTimeString([], {
+        nextBreakTime = breakTime.toLocaleTimeString([], {
           hour: "2-digit",
           minute: "2-digit",
         });
@@ -98,125 +109,61 @@ export function DashboardPage() {
     }
 
     return {
-      drivingHours: Math.round(totalDrivingTime * 10) / 10,
-      maxDrivingHours: 11,
-      onDutyHours: Math.round(totalOnDutyTime * 10) / 10,
-      maxOnDutyHours: 14,
-      isCompliant,
-      nextBreakRequired,
       activeTripId: activeTrip?.trip_id || null,
+      totalTrips: trips.length,
+      completedToday,
+      inProgress,
+      planned,
+      hoursWorkedToday: driverStatus?.today_on_duty_hours || 0,
+      nextBreakTime,
+    };
+  }, [trips, driverStatus]);
+
+  const tripCounts = useMemo((): TripCounts => {
+    return {
+      total: trips.length,
+      completed: trips.filter((trip) => trip.status === "completed").length,
+      inProgress: trips.filter((trip) => trip.status === "in_progress").length,
+      planned: trips.filter((trip) => trip.status === "planned").length,
+      draft: trips.filter((trip) => trip.status === "draft").length,
     };
   }, [trips]);
 
-  // Calculate trip counts
-  const tripCounts = useMemo((): TripCounts => {
-    return trips.reduce(
-      (counts, trip: TripListItem) => {
-        counts.total++;
-        switch (trip.status) {
-          case "completed":
-            counts.completed++;
-            break;
-          case "in_progress":
-            counts.inProgress++;
-            break;
-          case "planned":
-            counts.planned++;
-            break;
-          case "draft":
-            counts.draft++;
-            break;
-          default:
-            break;
-        }
-        return counts;
-      },
-      { total: 0, completed: 0, inProgress: 0, planned: 0, draft: 0 }
-    );
-  }, [trips]);
-
-  // Get recent trips (last 5)
   const recentTrips = useMemo(() => {
     return trips
       .sort(
-        (a: TripListItem, b: TripListItem) =>
-          new Date(b.departure_datetime).getTime() -
-          new Date(a.departure_datetime).getTime()
+        (a, b) =>
+          new Date(b.created_at).getTime() - new Date(a.created_at).getTime()
       )
       .slice(0, 5);
   }, [trips]);
+
+  const handleRefreshAll = () => {
+    refetchTrips();
+    refetchStatus();
+  };
 
   const formatDateTime = (dateTimeString: string): string => {
     return new Date(dateTimeString).toLocaleDateString();
   };
 
   // Loading state
-  if (isLoading) {
+  if (tripsLoading || statusLoading) {
     return (
       <Layout>
-        <div className="space-y-6">
+        <div className="max-w-7xl mx-auto space-y-6">
           <div className="flex justify-between items-center">
             <div>
               <h1 className="text-2xl font-bold text-gray-900">
-                Welcome back, {user?.first_name}!
+                Welcome back, {user?.first_name || user?.username}
               </h1>
               <p className="text-gray-600">Loading your dashboard...</p>
             </div>
           </div>
-
           <div className="flex items-center justify-center py-12">
-            <LoadingSpinner size="large" text="Loading dashboard data..." />
+            <LoadingSpinner size="large" />
+            <span className="ml-3 text-lg">Loading dashboard data...</span>
           </div>
-        </div>
-      </Layout>
-    );
-  }
-
-  // Error state
-  if (isError) {
-    return (
-      <Layout>
-        <div className="space-y-6">
-          <div className="flex justify-between items-center">
-            <div>
-              <h1 className="text-2xl font-bold text-gray-900">
-                Welcome back, {user?.first_name}!
-              </h1>
-              <p className="text-gray-600">Dashboard</p>
-            </div>
-            <Link to="/trips/new">
-              <Button leftIcon={<Plus className="w-4 h-4" />}>
-                Plan New Trip
-              </Button>
-            </Link>
-          </div>
-
-          <Card className="border-red-200 bg-red-50">
-            <CardContent className="p-6">
-              <div className="flex items-center space-x-3">
-                <AlertCircle className="w-8 h-8 text-red-600" />
-                <div>
-                  <h3 className="text-lg font-medium text-red-800">
-                    Failed to Load Dashboard
-                  </h3>
-                  <p className="text-red-700 mt-1">
-                    {error instanceof Error
-                      ? error.message
-                      : "An unexpected error occurred"}
-                  </p>
-                  <Button
-                    variant="secondary"
-                    size="sm"
-                    onClick={() => refetch()}
-                    className="mt-3"
-                    leftIcon={<RefreshCw className="w-4 h-4" />}
-                  >
-                    Try Again
-                  </Button>
-                </div>
-              </div>
-            </CardContent>
-          </Card>
         </div>
       </Layout>
     );
@@ -224,218 +171,139 @@ export function DashboardPage() {
 
   return (
     <Layout>
-      <div className="space-y-6">
-        {/* Welcome Header */}
-        <div className="flex justify-between items-center">
+      <div className="max-w-7xl mx-auto space-y-6">
+        {/* Header */}
+        <div className="flex items-center justify-between">
           <div>
             <h1 className="text-2xl font-bold text-gray-900">
-              Welcome back, {user?.first_name}!
+              Welcome back, {user?.first_name || user?.username}
             </h1>
-            <p className="text-gray-600">
-              Here's your HOS status and recent activity
+            <p className="text-gray-600 mt-1">
+              Here's your HOS status and trip overview for today
             </p>
           </div>
-          <Link to="/trips/new">
-            <Button leftIcon={<Plus className="w-4 h-4" />}>
-              Plan New Trip
+          <div className="flex items-center space-x-3">
+            <Button
+              variant="ghost"
+              onClick={handleRefreshAll}
+              leftIcon={<RefreshCw className="w-4 h-4" />}
+            >
+              Refresh
             </Button>
-          </Link>
+            <Link to="/trips/create">
+              <Button leftIcon={<Plus className="w-4 h-4" />}>
+                Plan New Trip
+              </Button>
+            </Link>
+          </div>
         </div>
 
-        {/* Active Trip Alert */}
-        {dashboardStats.activeTripId && (
-          <Card className="border-blue-200 bg-blue-50">
-            <CardContent className="p-4">
-              <div className="flex items-center justify-between">
-                <div className="flex items-center space-x-3">
-                  <Truck className="w-6 h-6 text-blue-600" />
-                  <div>
-                    <p className="font-medium text-blue-800">
-                      Active Trip in Progress
-                    </p>
-                    <p className="text-sm text-blue-600">
-                      You have an active trip running. Monitor your HOS status
-                      carefully.
-                    </p>
-                  </div>
+        {/* Current HOS Status */}
+        <DriverStatusCard showActions={true} />
+
+        {/* Quick Stats */}
+        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
+          <Card>
+            <CardContent className="p-6">
+              <div className="flex items-center">
+                <div className="flex-1">
+                  <p className="text-sm font-medium text-gray-600">
+                    Active Trip
+                  </p>
+                  <p className="text-2xl font-bold text-gray-900">
+                    {dashboardStats.activeTripId ? "1" : "0"}
+                  </p>
                 </div>
-                <Link to={`/trips/${dashboardStats.activeTripId}`}>
-                  <Button variant="secondary" size="sm">
-                    View Trip
-                  </Button>
-                </Link>
+                <Truck className="w-8 h-8 text-blue-600" />
+              </div>
+              {dashboardStats.activeTripId && (
+                <div className="mt-2">
+                  <Link to={`/trips/${dashboardStats.activeTripId}`}>
+                    <Button variant="ghost" size="sm" className="text-blue-600">
+                      View Active Trip
+                    </Button>
+                  </Link>
+                </div>
+              )}
+            </CardContent>
+          </Card>
+
+          <Card>
+            <CardContent className="p-6">
+              <div className="flex items-center">
+                <div className="flex-1">
+                  <p className="text-sm font-medium text-gray-600">
+                    Completed Today
+                  </p>
+                  <p className="text-2xl font-bold text-gray-900">
+                    {dashboardStats.completedToday}
+                  </p>
+                </div>
+                <CheckCircle className="w-8 h-8 text-green-600" />
+              </div>
+            </CardContent>
+          </Card>
+
+          <Card>
+            <CardContent className="p-6">
+              <div className="flex items-center">
+                <div className="flex-1">
+                  <p className="text-sm font-medium text-gray-600">
+                    Hours Worked Today
+                  </p>
+                  <p className="text-2xl font-bold text-gray-900">
+                    {dashboardStats.hoursWorkedToday.toFixed(1)}
+                  </p>
+                  <p className="text-xs text-gray-500">of 14 allowed</p>
+                </div>
+                <Clock className="w-8 h-8 text-orange-600" />
+              </div>
+            </CardContent>
+          </Card>
+
+          <Card>
+            <CardContent className="p-6">
+              <div className="flex items-center">
+                <div className="flex-1">
+                  <p className="text-sm font-medium text-gray-600">
+                    Planned Trips
+                  </p>
+                  <p className="text-2xl font-bold text-gray-900">
+                    {dashboardStats.planned}
+                  </p>
+                </div>
+                <Route className="w-8 h-8 text-purple-600" />
+              </div>
+            </CardContent>
+          </Card>
+        </div>
+
+        {/* Next Break Alert */}
+        {dashboardStats.nextBreakTime && (
+          <Card className="border-amber-200 bg-amber-50">
+            <CardContent className="p-4">
+              <div className="flex items-center space-x-3">
+                <AlertTriangle className="w-6 h-6 text-amber-600" />
+                <div>
+                  <p className="font-medium text-amber-800">
+                    Break Required Soon
+                  </p>
+                  <p className="text-sm text-amber-700">
+                    Next 30-minute break required around{" "}
+                    {dashboardStats.nextBreakTime}
+                  </p>
+                </div>
               </div>
             </CardContent>
           </Card>
         )}
 
-        {/* HOS Status Cards */}
-        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
-          {/* Driving Hours */}
-          <Card>
-            <CardContent className="p-6">
-              <div className="flex items-center justify-between">
-                <div>
-                  <p className="text-sm font-medium text-gray-600">
-                    Driving Hours
-                  </p>
-                  <p className="text-2xl font-bold text-gray-900">
-                    {dashboardStats.drivingHours} /{" "}
-                    {dashboardStats.maxDrivingHours}
-                  </p>
-                  <p className="text-sm text-gray-500">
-                    {(
-                      dashboardStats.maxDrivingHours -
-                      dashboardStats.drivingHours
-                    ).toFixed(1)}{" "}
-                    hours remaining
-                  </p>
-                </div>
-                <div className="w-12 h-12 bg-blue-100 rounded-lg flex items-center justify-center">
-                  <Clock className="w-6 h-6 text-blue-600" />
-                </div>
-              </div>
-            </CardContent>
-          </Card>
-
-          {/* On-Duty Hours */}
-          <Card>
-            <CardContent className="p-6">
-              <div className="flex items-center justify-between">
-                <div>
-                  <p className="text-sm font-medium text-gray-600">
-                    On-Duty Hours
-                  </p>
-                  <p className="text-2xl font-bold text-gray-900">
-                    {dashboardStats.onDutyHours} /{" "}
-                    {dashboardStats.maxOnDutyHours}
-                  </p>
-                  <p className="text-sm text-gray-500">
-                    {(
-                      dashboardStats.maxOnDutyHours - dashboardStats.onDutyHours
-                    ).toFixed(1)}{" "}
-                    hours remaining
-                  </p>
-                </div>
-                <div className="w-12 h-12 bg-orange-100 rounded-lg flex items-center justify-center">
-                  <Truck className="w-6 h-6 text-orange-600" />
-                </div>
-              </div>
-            </CardContent>
-          </Card>
-
-          {/* Compliance Status */}
-          <Card>
-            <CardContent className="p-6">
-              <div className="flex items-center justify-between">
-                <div>
-                  <p className="text-sm font-medium text-gray-600">
-                    HOS Status
-                  </p>
-                  <p
-                    className={`text-2xl font-bold ${
-                      dashboardStats.isCompliant
-                        ? "text-green-600"
-                        : "text-red-600"
-                    }`}
-                  >
-                    {dashboardStats.isCompliant ? "Compliant" : "Violation"}
-                  </p>
-                  <p className="text-sm text-gray-500">Current status</p>
-                </div>
-                <div
-                  className={`w-12 h-12 rounded-lg flex items-center justify-center ${
-                    dashboardStats.isCompliant ? "bg-green-100" : "bg-red-100"
-                  }`}
-                >
-                  {dashboardStats.isCompliant ? (
-                    <CheckCircle className="w-6 h-6 text-green-600" />
-                  ) : (
-                    <AlertTriangle className="w-6 h-6 text-red-600" />
-                  )}
-                </div>
-              </div>
-            </CardContent>
-          </Card>
-
-          {/* Next Break */}
-          <Card>
-            <CardContent className="p-6">
-              <div className="flex items-center justify-between">
-                <div>
-                  <p className="text-sm font-medium text-gray-600">
-                    Next Break
-                  </p>
-                  <p className="text-2xl font-bold text-gray-900">
-                    {dashboardStats.nextBreakRequired || "N/A"}
-                  </p>
-                  <p className="text-sm text-gray-500">
-                    {dashboardStats.nextBreakRequired
-                      ? "30-min break required"
-                      : "No break required"}
-                  </p>
-                </div>
-                <div className="w-12 h-12 bg-purple-100 rounded-lg flex items-center justify-center">
-                  <AlertTriangle className="w-6 h-6 text-purple-600" />
-                </div>
-              </div>
-            </CardContent>
-          </Card>
-        </div>
-
-        {/* Trip Statistics */}
-        <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
-          <Card>
-            <CardContent className="p-4">
-              <div className="text-center">
-                <p className="text-2xl font-bold text-gray-900">
-                  {tripCounts.completed}
-                </p>
-                <p className="text-sm text-gray-600">Completed</p>
-              </div>
-            </CardContent>
-          </Card>
-
-          <Card>
-            <CardContent className="p-4">
-              <div className="text-center">
-                <p className="text-2xl font-bold text-blue-600">
-                  {tripCounts.inProgress}
-                </p>
-                <p className="text-sm text-gray-600">In Progress</p>
-              </div>
-            </CardContent>
-          </Card>
-
-          <Card>
-            <CardContent className="p-4">
-              <div className="text-center">
-                <p className="text-2xl font-bold text-yellow-600">
-                  {tripCounts.planned}
-                </p>
-                <p className="text-sm text-gray-600">Planned</p>
-              </div>
-            </CardContent>
-          </Card>
-
-          <Card>
-            <CardContent className="p-4">
-              <div className="text-center">
-                <p className="text-2xl font-bold text-gray-600">
-                  {tripCounts.draft}
-                </p>
-                <p className="text-sm text-gray-600">Draft</p>
-              </div>
-            </CardContent>
-          </Card>
-        </div>
-
-        {/* Recent Trips and Quick Actions */}
+        {/* Main Content Grid */}
         <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-          {/* Recent Trips List */}
+          {/* Recent Trips */}
           <Card>
             <CardHeader>
-              <div className="flex justify-between items-center">
+              <div className="flex items-center justify-between">
                 <CardTitle>Recent Trips</CardTitle>
                 <Link to="/trips">
                   <Button variant="ghost" size="sm">
@@ -447,135 +315,259 @@ export function DashboardPage() {
             <CardContent>
               {recentTrips.length === 0 ? (
                 <div className="text-center py-8">
-                  <Route className="w-12 h-12 text-gray-400 mx-auto mb-4" />
-                  <p className="text-gray-600 mb-4">No trips yet</p>
-                  <Link to="/trips/new">
-                    <Button size="sm">Plan Your First Trip</Button>
+                  <Truck className="w-12 h-12 text-gray-400 mx-auto mb-4" />
+                  <p className="text-gray-500">No trips yet</p>
+                  <Link to="/trips/create">
+                    <Button className="mt-3" size="sm">
+                      Create Your First Trip
+                    </Button>
                   </Link>
                 </div>
               ) : (
-                <div className="space-y-4">
-                  {recentTrips.map((trip: TripListItem) => (
-                    <Link
+                <div className="space-y-3">
+                  {recentTrips.map((trip) => (
+                    <div
                       key={trip.trip_id}
-                      to={`/trips/${trip.trip_id}`}
-                      className="block hover:bg-gray-50 rounded-lg transition-colors"
+                      className="flex items-center justify-between p-3 border border-gray-200 rounded-lg hover:bg-gray-50"
                     >
-                      <div className="flex items-center justify-between p-3 border border-gray-200 rounded-lg">
-                        <div className="flex items-center space-x-3">
-                          <div className="w-10 h-10 bg-blue-100 rounded-lg flex items-center justify-center">
-                            <Route className="w-5 h-5 text-blue-600" />
-                          </div>
-                          <div>
-                            <p className="font-medium text-gray-900">
-                              {trip.current_address} →{" "}
-                              {trip.destination_address}
-                            </p>
-                            <p className="text-sm text-gray-500">
-                              {formatDateTime(trip.departure_datetime)}
-                            </p>
-                          </div>
-                        </div>
+                      <div className="flex-1 min-w-0">
                         <div className="flex items-center space-x-2">
+                          <p className="text-sm font-medium text-gray-900 truncate">
+                            {trip.pickup_address} → {trip.delivery_address}
+                          </p>
                           <span
-                            className={`inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium ${
+                            className={`inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium ${
                               trip.status === "completed"
                                 ? "bg-green-100 text-green-800"
                                 : trip.status === "in_progress"
-                                ? "bg-blue-100 text-blue-800"
-                                : trip.status === "planned"
                                 ? "bg-yellow-100 text-yellow-800"
+                                : trip.status === "planned"
+                                ? "bg-blue-100 text-blue-800"
                                 : "bg-gray-100 text-gray-800"
                             }`}
                           >
                             {trip.status_display}
                           </span>
-                          {trip.is_hos_compliant && (
-                            <CheckCircle className="w-4 h-4 text-green-500" />
-                          )}
                         </div>
+                        <p className="text-xs text-gray-500 mt-1">
+                          <MapPin className="w-3 h-3 inline mr-1" />
+                          {trip.total_distance_miles
+                            ? `${Number(trip.total_distance_miles).toFixed(
+                                0
+                              )} mi`
+                            : "Distance TBD"}
+                          {trip.total_driving_time
+                            ? ` • ${Number(trip.total_driving_time).toFixed(
+                                1
+                              )}h driving`
+                            : ""}
+                        </p>
+                        <p className="text-xs text-gray-500">
+                          Created {formatDateTime(trip.created_at)}
+                        </p>
                       </div>
-                    </Link>
+                      <div className="flex items-center space-x-2">
+                        {!trip.is_hos_compliant && (
+                          <AlertTriangle
+                            className="w-4 h-4 text-amber-500"
+                          />
+                        )}
+                        <Link to={`/trips/${trip.trip_id}`}>
+                          <Button variant="ghost" size="sm">
+                            View
+                          </Button>
+                        </Link>
+                      </div>
+                    </div>
                   ))}
                 </div>
               )}
             </CardContent>
           </Card>
 
-          {/* Quick Actions */}
+          {/* Trip Summary & Actions */}
           <Card>
             <CardHeader>
-              <CardTitle>Quick Actions</CardTitle>
+              <CardTitle>Trip Summary</CardTitle>
             </CardHeader>
             <CardContent>
-              <div className="space-y-3">
-                <Link to="/trips/new" className="block">
-                  <Button className="w-full justify-start" variant="ghost">
-                    <Plus className="w-4 h-4 mr-2" />
-                    Plan New Trip
-                  </Button>
-                </Link>
-
-                <Link to="/trips" className="block">
-                  <Button className="w-full justify-start" variant="ghost">
-                    <Route className="w-4 h-4 mr-2" />
-                    View My Trips
-                  </Button>
-                </Link>
-
-                {dashboardStats.activeTripId && (
-                  <Link
-                    to={`/trips/${dashboardStats.activeTripId}`}
-                    className="block"
-                  >
-                    <Button className="w-full justify-start" variant="ghost">
-                      <Truck className="w-4 h-4 mr-2" />
-                      View Active Trip
-                    </Button>
-                  </Link>
-                )}
-
-                <Link to="/profile" className="block">
-                  <Button className="w-full justify-start" variant="ghost">
-                    <MapPin className="w-4 h-4 mr-2" />
-                    Update Profile
-                  </Button>
-                </Link>
-              </div>
-
-              {/* Today's Summary */}
-              <div className="mt-6 pt-4 border-t border-gray-200">
-                <h4 className="text-sm font-medium text-gray-900 mb-3">
-                  Today's Summary
-                </h4>
-                <div className="space-y-2 text-sm">
-                  <div className="flex justify-between">
-                    <span className="text-gray-600">Trips Completed</span>
-                    <span className="font-medium">{tripCounts.completed}</span>
+              <div className="space-y-4">
+                {/* Trip Status Grid */}
+                <div className="grid grid-cols-2 gap-4">
+                  <div className="bg-gray-50 p-3 rounded-lg">
+                    <p className="text-sm text-gray-600">Total Trips</p>
+                    <p className="text-xl font-bold text-gray-900">
+                      {tripCounts.total}
+                    </p>
                   </div>
-                  <div className="flex justify-between">
-                    <span className="text-gray-600">Hours Driven</span>
-                    <span className="font-medium">
-                      {dashboardStats.drivingHours}
-                    </span>
+                  <div className="bg-green-50 p-3 rounded-lg">
+                    <p className="text-sm text-green-600">Completed</p>
+                    <p className="text-xl font-bold text-green-900">
+                      {tripCounts.completed}
+                    </p>
                   </div>
-                  <div className="flex justify-between">
-                    <span className="text-gray-600">HOS Status</span>
-                    <span
-                      className={`font-medium ${
-                        dashboardStats.isCompliant
-                          ? "text-green-600"
-                          : "text-red-600"
-                      }`}
-                    >
-                      {dashboardStats.isCompliant ? "Compliant" : "Violation"}
-                    </span>
+                  <div className="bg-yellow-50 p-3 rounded-lg">
+                    <p className="text-sm text-yellow-600">In Progress</p>
+                    <p className="text-xl font-bold text-yellow-900">
+                      {tripCounts.inProgress}
+                    </p>
+                  </div>
+                  <div className="bg-blue-50 p-3 rounded-lg">
+                    <p className="text-sm text-blue-600">Planned</p>
+                    <p className="text-xl font-bold text-blue-900">
+                      {tripCounts.planned}
+                    </p>
+                  </div>
+                </div>
+
+                {/* Quick Actions */}
+                <div className="border-t pt-4">
+                  <p className="text-sm font-medium text-gray-700 mb-3">
+                    Quick Actions
+                  </p>
+                  <div className="space-y-2">
+                    <Link to="/trips/create" className="block">
+                      <Button
+                        className="w-full"
+                        leftIcon={<Plus className="w-4 h-4" />}
+                      >
+                        Plan New Trip
+                      </Button>
+                    </Link>
+                    <Link to="/trips" className="block">
+                      <Button
+                        variant="primary"
+                        className="w-full"
+                        leftIcon={<Route className="w-4 h-4" />}
+                      >
+                        View All Trips
+                      </Button>
+                    </Link>
+                    {dashboardStats.activeTripId && (
+                      <Link
+                        to={`/trips/${dashboardStats.activeTripId}`}
+                        className="block"
+                      >
+                        <Button
+                          variant="ghost"
+                          className="w-full"
+                          leftIcon={<Truck className="w-4 h-4" />}
+                        >
+                          View Active Trip
+                        </Button>
+                      </Link>
+                    )}
+                  </div>
+                </div>
+
+                {/* Today's Summary */}
+                <div className="border-t pt-4">
+                  <h4 className="text-sm font-medium text-gray-900 mb-3">
+                    Today's Summary
+                  </h4>
+                  <div className="space-y-2 text-sm">
+                    <div className="flex justify-between">
+                      <span className="text-gray-600">Trips Completed</span>
+                      <span className="font-medium">
+                        {dashboardStats.completedToday}
+                      </span>
+                    </div>
+                    <div className="flex justify-between">
+                      <span className="text-gray-600">Hours Worked</span>
+                      <span className="font-medium">
+                        {dashboardStats.hoursWorkedToday.toFixed(1)}h
+                      </span>
+                    </div>
+                    {driverStatus && (
+                      <>
+                        <div className="flex justify-between">
+                          <span className="text-gray-600">Driving Hours</span>
+                          <span className="font-medium">
+                            {driverStatus.today_driving_hours.toFixed(1)}h
+                          </span>
+                        </div>
+                        <div className="flex justify-between">
+                          <span className="text-gray-600">HOS Status</span>
+                          <span
+                            className={`font-medium ${
+                              driverStatus.needs_immediate_break
+                                ? "text-red-600"
+                                : driverStatus.compliance_warnings.length > 0
+                                ? "text-amber-600"
+                                : "text-green-600"
+                            }`}
+                          >
+                            {driverStatus.needs_immediate_break
+                              ? "Break Required"
+                              : driverStatus.compliance_warnings.length > 0
+                              ? "Warnings"
+                              : "Compliant"}
+                          </span>
+                        </div>
+                      </>
+                    )}
                   </div>
                 </div>
               </div>
             </CardContent>
           </Card>
         </div>
+
+        {/* Error States */}
+        {(tripsError || statusError) && (
+          <Card className="border-red-200 bg-red-50">
+            <CardContent className="p-4">
+              <div className="flex items-start space-x-3">
+                <AlertCircle className="w-5 h-5 text-red-600 mt-0.5" />
+                <div className="flex-1">
+                  <h4 className="font-medium text-red-800">
+                    Error Loading Dashboard
+                  </h4>
+                  <p className="text-sm text-red-700 mt-1">
+                    {tripsError &&
+                      `Failed to load trips: ${tripsErrorMsg?.message}`}
+                    {tripsError && statusError && " • "}
+                    {statusError && `Failed to load HOS status`}
+                  </p>
+                  <Button
+                    variant="ghost"
+                    size="sm"
+                    onClick={handleRefreshAll}
+                    className="mt-2 text-red-600 border-red-200 hover:bg-red-100"
+                  >
+                    Try Again
+                  </Button>
+                </div>
+              </div>
+            </CardContent>
+          </Card>
+        )}
+
+        {/* HOS Compliance Warnings */}
+        {driverStatus?.compliance_warnings &&
+          driverStatus.compliance_warnings.length > 0 && (
+            <Card className="border-amber-200 bg-amber-50">
+              <CardContent className="p-4">
+                <div className="flex items-start space-x-3">
+                  <AlertTriangle className="w-5 h-5 text-amber-600 mt-0.5" />
+                  <div className="flex-1">
+                    <h4 className="font-medium text-amber-800">
+                      HOS Compliance Alerts
+                    </h4>
+                    <ul className="mt-2 space-y-1">
+                      {driverStatus.compliance_warnings.map(
+                        (warning, index) => (
+                          <li key={index} className="text-sm text-amber-700">
+                            • {warning.message}
+                          </li>
+                        )
+                      )}
+                    </ul>
+                  </div>
+                </div>
+              </CardContent>
+            </Card>
+          )}
       </div>
     </Layout>
   );
