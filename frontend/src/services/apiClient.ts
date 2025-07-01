@@ -8,6 +8,11 @@ const API_BASE_URL =
 
 class ApiClient {
   private client: AxiosInstance;
+  private isRefreshing = false;
+  private failedQueue: Array<{
+    resolve: (value?: any) => void;
+    reject: (error?: any) => void;
+  }> = [];
 
   constructor(baseURL: string) {
     this.client = axios.create({
@@ -19,6 +24,18 @@ class ApiClient {
     });
 
     this.setupInterceptors();
+  }
+
+  private processQueue(error: any, token: string | null = null): void {
+    this.failedQueue.forEach(({ resolve, reject }) => {
+      if (error) {
+        reject(error);
+      } else {
+        resolve(token);
+      }
+    });
+
+    this.failedQueue = [];
   }
 
   private setupInterceptors(): void {
@@ -44,13 +61,30 @@ class ApiClient {
 
         // If unauthorized and we haven't already tried to refresh
         if (error.response?.status === 401 && !originalRequest._retry) {
+          if (this.isRefreshing) {
+            // If we're already refreshing, queue this request
+            return new Promise((resolve, reject) => {
+              this.failedQueue.push({ resolve, reject });
+            })
+              .then((token) => {
+                originalRequest.headers.Authorization = `Bearer ${token}`;
+                return this.client(originalRequest);
+              })
+              .catch((err) => {
+                return Promise.reject(err);
+              });
+          }
+
           originalRequest._retry = true;
+          this.isRefreshing = true;
 
           try {
             const refreshToken = localStorage.getItem("refresh_token");
             if (!refreshToken) {
               throw new Error("No refresh token available");
             }
+
+            console.log("Attempting to refresh token due to 401 error");
 
             // Try to refresh the token
             const refreshResponse = await axios.post(
@@ -61,20 +95,43 @@ class ApiClient {
             const newAccessToken = refreshResponse.data.access;
             localStorage.setItem("access_token", newAccessToken);
 
+            // If we get a new refresh token, update it
+            if (refreshResponse.data.refresh) {
+              localStorage.setItem(
+                "refresh_token",
+                refreshResponse.data.refresh
+              );
+            }
+
+            console.log("Token refreshed successfully in interceptor");
+
+            // Process the queued requests with new token
+            this.processQueue(null, newAccessToken);
+
             // Retry the original request with new token
             originalRequest.headers.Authorization = `Bearer ${newAccessToken}`;
             return this.client(originalRequest);
           } catch (refreshError) {
-            // Clear tokens and redirect to login
+            console.error("Token refresh failed in interceptor:", refreshError);
+
+            // Process the queued requests with error
+            this.processQueue(refreshError, null);
+
+            // Clear tokens
             localStorage.removeItem("access_token");
             localStorage.removeItem("refresh_token");
 
-            // Only redirect if not already on the login page
-            if (window.location.pathname !== "/login") {
+            if (
+              window.location.pathname !== "/login" &&
+              !originalRequest.url?.includes("/auth/")
+            ) {
+              console.log("Redirecting to login due to refresh failure");
               window.location.href = "/login";
             }
 
             return Promise.reject(refreshError);
+          } finally {
+            this.isRefreshing = false;
           }
         }
 

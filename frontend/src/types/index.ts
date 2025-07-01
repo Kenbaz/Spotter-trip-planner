@@ -21,6 +21,18 @@ export interface User {
   date_joined: string;
 }
 
+export interface ApiError {
+  response?: {
+    status: number;
+    data?: {
+      detail?: string;
+      non_field_errors?: string[];
+    };
+  };
+  code?: string;
+  message?: string;
+}
+
 export interface LoginCredentials {
   username: string;
   password: string;
@@ -34,6 +46,7 @@ export interface LoginResponse {
 
 export interface TokenRefreshResponse {
   access: string;
+  refresh: string;
 }
 
 // Vehicle Types
@@ -65,7 +78,7 @@ export interface Trip {
   vehicle_info: Vehicle | null;
   company_name: string;
   created_by_name: string;
-  status: "draft" | "planned" | "in_progress" | "completed" | "cancelled";
+  status: "draft" | "Planned" | "in_progress" | "completed" | "cancelled";
   status_display: string;
   is_editable: boolean;
 

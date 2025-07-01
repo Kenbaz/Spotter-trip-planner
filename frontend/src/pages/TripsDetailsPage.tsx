@@ -20,8 +20,6 @@ import {
   FileText,
   Download,
   Edit,
-  Play,
-  Square,
   Map,
   Calculator,
   Navigation,
@@ -40,9 +38,9 @@ import { useELDLogs } from "../hooks/useELDLogs";
 import { ELDLogViewer } from "../components/ELDLogs/ELDLogViewer";
 import { RouteMap } from "../components/Maps/RouteMap";
 import { useMap } from "../hooks/useMap";
+import { TripActions } from "../components/UI/TripActions";
 import type { RoutePlanStop } from "../types";
 import type { LatLngExpression } from "leaflet";
-
 
 type TabType = "overview" | "map" | "stops" | "hos" | "compliance" | "eld_logs";
 
@@ -61,8 +59,6 @@ export function TripDetailPage() {
 
   const { data: complianceResponse, isLoading: isComplianceLoading } =
     useGetTripComplianceReport(tripId);
-  
-  console.log('complianceResponse:', complianceResponse);
 
   const deleteTrip = useDeleteTrip();
 
@@ -100,7 +96,6 @@ export function TripDetailPage() {
   });
 
   const trip = tripResponse?.trip;
-  console.log("Trip Data:", trip);
   const complianceReport = complianceResponse?.compliance_report;
 
   const {
@@ -109,8 +104,7 @@ export function TripDetailPage() {
     // userLocation,
     // getCurrentUserLocation,
     // hasRoute
-  } = useMap({ trip })
-  
+  } = useMap({ trip });
 
   const getStatusBadge = (status: string) => {
     const baseClasses =
@@ -229,6 +223,12 @@ export function TripDetailPage() {
     // Future: Allow route modification by clicking on map
   };
 
+  const hasCompletionData = () => {
+    const recentCompletionKey = `trip_completion_${trip?.trip_id}`;
+    const storedCompletion = sessionStorage.getItem(recentCompletionKey);
+    return !!storedCompletion;
+  };
+
   const tabs = [
     { id: "overview", label: "Overview", icon: Route },
     { id: "map", label: "Map", icon: Map },
@@ -323,7 +323,7 @@ export function TripDetailPage() {
 
   return (
     <Layout>
-      <div className="space-y-6">
+      <div className="space-y-6 mt-14">
         {/* Header */}
         <div className="flex items-center justify-between">
           <div className="flex items-center space-x-4">
@@ -345,19 +345,6 @@ export function TripDetailPage() {
           </div>
 
           <div className="flex items-center space-x-3">
-            {trip.status === "planned" && (
-              <Button leftIcon={<Play className="w-4 h-4" />}>
-                Start Trip
-              </Button>
-            )}
-            {trip.status === "in_progress" && (
-              <Button
-                variant="danger"
-                leftIcon={<Square className="w-4 h-4" />}
-              >
-                End Trip
-              </Button>
-            )}
             {trip.status === "draft" && (
               <Link to={`/trips/${tripId}/edit`}>
                 <Button leftIcon={<Edit className="w-4 h-4" />}>
@@ -417,39 +404,78 @@ export function TripDetailPage() {
           </Card>
         )}
 
-        {/* Trip Actions Card */}
-        {trip.is_editable && (
-          <Card>
-            <CardHeader>
-              <CardTitle className="flex items-center">
-                <Settings className="w-5 h-5 mr-2" />
-                Trip Actions
-              </CardTitle>
-            </CardHeader>
-            <CardContent>
-              <div className="flex flex-wrap gap-3">
-                <Button
-                  leftIcon={<Calculator className="w-4 h-4" />}
-                  onClick={handleCalculateRoute}
-                  isLoading={isCalculating}
-                  disabled={isCalculating || isOptimizing}
-                >
-                  {isCalculating ? "Calculating..." : "Calculate Route"}
-                </Button>
+        <Card>
+          <CardContent>
+            <div className="space-y-4">
+              {/* Route Calculation Actions */}
+              {trip.status === "draft" && (
+                <div className="space-y-3">
+                  <CardHeader>
+                    <CardTitle className="flex items-center">
+                      <Settings className="w-5 h-5 mr-2" />
+                      Trip Actions
+                    </CardTitle>
+                  </CardHeader>
+                  <div className="flex items-center space-x-2 text-blue-600 mb-2">
+                    <Calculator className="w-5 h-5" />
+                    <span className="font-medium">Route Planning</span>
+                  </div>
+                  <div className="flex flex-wrap gap-3">
+                    <Button
+                      leftIcon={<Calculator className="w-4 h-4" />}
+                      onClick={handleCalculateRoute}
+                      isLoading={isCalculating}
+                      disabled={isCalculating || isOptimizing}
+                    >
+                      {isCalculating ? "Calculating..." : "Calculate Route"}
+                    </Button>
 
-                {trip.hos_periods.length > 0 && (
-                  <Button
-                    variant="secondary"
-                    leftIcon={<RefreshCw className="w-4 h-4" />}
-                    onClick={handleOptimizeRoute}
-                    isLoading={isOptimizing}
-                    disabled={isCalculating || isOptimizing}
-                  >
-                    {isOptimizing ? "Optimizing..." : "Optimize Route"}
-                  </Button>
-                )}
+                    {trip.hos_periods.length > 0 && (
+                      <Button
+                        variant="secondary"
+                        leftIcon={<RefreshCw className="w-4 h-4" />}
+                        onClick={handleOptimizeRoute}
+                        isLoading={isOptimizing}
+                        disabled={isCalculating || isOptimizing}
+                      >
+                        {isOptimizing ? "Optimizing..." : "Optimize Route"}
+                      </Button>
+                    )}
+                  </div>
+                </div>
+              )}
 
-                {trip.status === "draft" && (
+              {/* Trip Completion Actions */}
+              {(trip.status === "Planned" ||
+                (trip.status === "completed" && hasCompletionData())) && (
+                <div className="border-t pt-4">
+                  <div className="flex items-center space-x-2 text-green-600 mb-3">
+                    <CheckCircle className="w-5 h-5" />
+                    <span className="font-medium">
+                      {trip.status === "Planned"
+                        ? "Trip Completion"
+                        : "Trip Summary"}
+                    </span>
+                  </div>
+                  <TripActions
+                    trip={trip}
+                    onTripCompleted={(response) => {
+                      // Refetch trip data to get updated status
+                      refetchTrip();
+                      console.log("Trip completed:", response.message);
+                    }}
+                    showFullActions={false}
+                  />
+                </div>
+              )}
+
+              {/* Delete Action for Draft Trips */}
+              {trip.status === "draft" && (
+                <div className="border-t pt-4">
+                  <div className="flex items-center space-x-2 text-red-600 mb-3">
+                    <Trash2 className="w-5 h-5" />
+                    <span className="font-medium">Delete Trip</span>
+                  </div>
                   <Button
                     variant="danger"
                     leftIcon={<Trash2 className="w-4 h-4" />}
@@ -459,11 +485,11 @@ export function TripDetailPage() {
                   >
                     {deleteTrip.isPending ? "Deleting..." : "Delete Trip"}
                   </Button>
-                )}
-              </div>
-            </CardContent>
-          </Card>
-        )}
+                </div>
+              )}
+            </div>
+          </CardContent>
+        </Card>
 
         {/* Trip Status Card */}
         <Card>
@@ -564,7 +590,7 @@ export function TripDetailPage() {
           </nav>
         </div>
 
-        {/* Tab Content */}
+        {/* Tab Content - keeping all existing tab content unchanged */}
         {activeTab === "overview" && (
           <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
             <Card>
@@ -739,6 +765,7 @@ export function TripDetailPage() {
           </div>
         )}
 
+        {/* Rest of the tab content remains exactly the same as your original code */}
         {activeTab === "map" && (
           <div className="space-y-6">
             {/* Map Container */}

@@ -73,12 +73,11 @@ class TripAdmin(admin.ModelAdmin):
         if obj.status == 'completed' and obj.hos_updated:
             summary = obj.get_trip_hours_summary()
             return format_html(
-                "Driving: {:.1f}h | On-duty: {:.1f}h",
-                summary['driving_hours'],
-                summary['on_duty_hours']
+                "Driving: {}h | On-duty: {}h",
+                round(summary['driving_hours'], 1),
+                round(summary['on_duty_hours'], 1)
             )
         return "Not completed"
-    trip_hours_summary.short_description = "Trip Hours"
     
     def mark_completed(self, request, queryset):
         """Admin action to mark trips as completed"""

@@ -204,7 +204,7 @@ class Trip(models.Model):
 
             # Update driver cycle status
             if not self.hos_updated:
-                from .services import DriverCycleStatusService
+                from .services.DriverCycleStatusService import DriverCycleStatusService
                 
                 DriverCycleStatusService.update_status_for_trip_completion(self)
                 self.hos_updated = True

@@ -128,14 +128,14 @@ class TripViewSet(viewsets.ModelViewSet):
                     status=status.HTTP_400_BAD_REQUEST
                 )
             
-            if not trip.hos_periods.exits():
+            if not trip.hos_periods.exists():
                 return Response(
                     {'error': 'Trip must have calculated route and HOS periods before completion'}, 
                     status=status.HTTP_400_BAD_REQUEST
                 )
             
             with transaction.atomic():
-                trip.complet_trip()
+                trip.complete_trip()
 
                 hours_summary = trip.get_trip_hours_summary()
 
