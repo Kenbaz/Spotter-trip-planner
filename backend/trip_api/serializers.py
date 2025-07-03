@@ -3,7 +3,7 @@
 from rest_framework import serializers
 from django.utils import timezone
 from django.contrib.auth import get_user_model
-from .models import Trip, Route, Stops, HOSPeriod, ComplianceReport
+from .models import Trip, Route, Stops, HOSPeriod, ComplianceReport, ELDDailyLog, ELDLogEntry, ELDLocationRemark, ELDComplianceViolation, ELDExportRecord
 from users.models import DriverVehicleAssignment, DriverCycleStatus
 from users.serializers import DriverCycleStatusSerializer
 
@@ -696,3 +696,288 @@ class UserVehicleInfoSerializer(serializers.Serializer):
             }
             for vehicle in available_vehicles
         ]
+
+
+class ELDLogEntrySerializer(serializers.ModelSerializer):
+    """Serializer for individual ELD log entries (duty periods)"""
+    
+    duty_status_label = serializers.CharField(read_only=True)
+    duty_status_symbol = serializers.SerializerMethodField()
+    duty_status_color = serializers.SerializerMethodField()
+    
+    class Meta:
+        model = ELDLogEntry
+        fields = [
+            'id', 'start_time', 'end_time', 'duty_status', 'duty_status_label',
+            'duty_status_symbol', 'duty_status_color', 'duration_minutes', 'duration_hours',
+            'start_location', 'end_location', 'location_type',
+             'vehicle_miles', 'remarks', 'auto_generated_remarks',
+            'manual_remarks', 'grid_row', 'grid_column_start', 'grid_column_end',
+            'is_compliant', 'compliance_notes', 'was_manually_edited'
+        ]
+        read_only_fields = [
+            'duty_status_symbol', 'duty_status_color', 'duration_hours', 
+            'auto_generated_remarks', 'was_manually_edited'
+        ]
+    
+    def get_duty_status_symbol(self, obj):
+        return obj.get_duty_status_symbol()
+    
+    def get_duty_status_color(self, obj):
+        return obj.get_duty_status_color()
+
+
+class ELDLocationRemarkSerializer(serializers.ModelSerializer):
+    """Serializer for ELD location remarks"""
+    
+    location_type_display = serializers.CharField(source='get_location_type_display', read_only=True)
+    duty_status_display = serializers.CharField(source='get_duty_status_display', read_only=True)
+    
+    class Meta:
+        model = ELDLocationRemark
+        fields = [
+            'id', 'time', 'location', 'location_type', 'location_type_display', 'duty_status', 'duty_status_display', 'remarks', 'auto_generated', 'is_duty_status_change'
+        ]
+        read_only_fields = ['location_type_display', 'duty_status_display']
+
+
+class ELDComplianceViolationSerializer(serializers.ModelSerializer):
+    """Serializer for ELD compliance violations"""
+    
+    violation_type_display = serializers.CharField(source='get_violation_type_display', read_only=True)
+    severity_display = serializers.CharField(source='get_severity_display', read_only=True)
+    resolved_by_name = serializers.CharField(source='resolved_by.full_name', read_only=True)
+    
+    class Meta:
+        model = ELDComplianceViolation
+        fields = [
+            'id', 'violation_type', 'violation_type_display', 'severity', 
+            'severity_display', 'description', 'actual_value', 'limit_value',
+            'violation_amount', 'is_resolved', 'resolution_notes', 'resolved_at',
+            'resolved_by_name', 'detected_at'
+        ]
+        read_only_fields = [
+            'violation_type_display', 'severity_display', 'resolved_by_name',
+            'detected_at'
+        ]
+
+
+class ELDLocationRemarkSerializer(serializers.ModelSerializer):
+    """Serializer for ELD location remarks"""
+    
+    location_type_display = serializers.CharField(source='get_location_type_display', read_only=True)
+    duty_status_display = serializers.CharField(source='get_duty_status_display', read_only=True)
+    
+    class Meta:
+        model = ELDLocationRemark
+        fields = [
+            'id', 'time', 'location', 'location_type', 'location_type_display', 'duty_status', 'duty_status_display', 'remarks',
+            'auto_generated', 'is_duty_status_change'
+        ]
+        read_only_fields = ['location_type_display', 'duty_status_display']
+
+
+class ELDComplianceViolationSerializer(serializers.ModelSerializer):
+    """Serializer for ELD compliance violations"""
+    
+    violation_type_display = serializers.CharField(source='get_violation_type_display', read_only=True)
+    severity_display = serializers.CharField(source='get_severity_display', read_only=True)
+    resolved_by_name = serializers.CharField(source='resolved_by.full_name', read_only=True)
+    
+    class Meta:
+        model = ELDComplianceViolation
+        fields = [
+            'id', 'violation_type', 'violation_type_display', 'severity', 
+            'severity_display', 'description', 'actual_value', 'limit_value',
+            'violation_amount', 'is_resolved', 'resolution_notes', 'resolved_at',
+            'resolved_by_name', 'detected_at'
+        ]
+        read_only_fields = [
+            'violation_type_display', 'severity_display', 'resolved_by_name',
+            'detected_at'
+        ]
+
+
+class ELDDailyLogSerializer(serializers.ModelSerializer):
+    """Serializer for ELD daily logs with nested entries and remarks"""
+    
+    log_entries = ELDLogEntrySerializer(many=True, read_only=True)
+    location_remarks = ELDLocationRemarkSerializer(many=True, read_only=True)
+    compliance_violations = ELDComplianceViolationSerializer(many=True, read_only=True)
+    compliance_grade = serializers.SerializerMethodField()
+    driver_name_display = serializers.CharField(source='driver.full_name', read_only=True)
+    
+    class Meta:
+        model = ELDDailyLog
+        fields = [
+            # Basic identification
+            'log_id', 'trip', 'log_date', 'driver', 'driver_name_display',
+            
+            # Auto-populated header info
+            'driver_name', 'driver_license_number', 'driver_license_state', 'employee_id',
+            'carrier_name', 'carrier_address', 'dot_number', 'mc_number',
+            'vehicle_id', 'license_plate', 'vin', 'vehicle_make_model',
+            
+            # Daily totals
+            'total_off_duty_hours', 'total_sleeper_berth_hours', 'total_driving_hours',
+            'total_on_duty_not_driving_hours', 'total_on_duty_hours', 'total_distance_miles',
+            
+            # Shipping documents
+            'bill_of_lading', 'manifest_number', 'pickup_number', 'delivery_receipt',
+            'commodity_description', 'cargo_weight', 'is_hazmat',
+            
+            'is_compliant', 'compliance_score', 'compliance_grade', 'violation_count', 'warning_count',
+            
+            'is_certified', 'certified_at', 'certification_statement',
+            
+            'auto_generated', 'manual_edits_count', 'generated_at', 'updated_at',
+            
+            'log_entries', 'location_remarks', 'compliance_violations'
+        ]
+        read_only_fields = [
+            'log_id', 'driver_name_display', 'compliance_grade', 'violation_count',
+            'warning_count', 'manual_edits_count', 'generated_at', 'updated_at'
+        ]
+    
+    def get_compliance_grade(self, obj):
+        return obj.get_compliance_grade()
+
+
+class ELDDailyLogSummarySerializer(serializers.ModelSerializer):
+    """Simplified serializer for ELD daily log listings"""
+    
+    driver_name_display = serializers.CharField(source='driver.full_name', read_only=True)
+    trip_id = serializers.CharField(source='trip.trip_id', read_only=True)
+    compliance_grade = serializers.SerializerMethodField()
+    
+    class Meta:
+        model = ELDDailyLog
+        fields = [
+            'log_id', 'log_date', 'driver_name_display', 'trip_id',
+            'total_driving_hours', 'total_on_duty_hours', 'total_distance_miles',
+            'is_compliant', 'compliance_score', 'compliance_grade', 'violation_count',
+            'is_certified', 'certified_at', 'auto_generated'
+        ]
+        read_only_fields = ['compliance_grade']
+    
+    def get_compliance_grade(self, obj):
+        return obj.get_compliance_grade()
+
+
+class ELDLogGenerationRequestSerializer(serializers.Serializer):
+    """Serializer for ELD log generation requests"""
+    
+    save_to_database = serializers.BooleanField(default=True)
+    include_compliance_validation = serializers.BooleanField(default=True)
+    auto_certify = serializers.BooleanField(default=False)
+    export_format = serializers.ChoiceField(
+        choices=[('json', 'JSON'), ('pdf_data', 'PDF Data')],
+        default='json'
+    )
+    generate_missing_only = serializers.BooleanField(
+        default=False,
+        help_text="Only generate logs for days that don't already have ELD logs"
+    )
+
+
+class ELDLogGenerationResponseSerializer(serializers.Serializer):
+    """Serializer for ELD log generation responses"""
+    
+    success = serializers.BooleanField()
+    trip_id = serializers.UUIDField()
+    logs_generated = serializers.IntegerField()
+    logs_updated = serializers.IntegerField()
+    total_days = serializers.IntegerField()
+    log_date_range = serializers.DictField()
+    daily_logs = ELDDailyLogSerializer(many=True, required=False)
+    compliance_summary = serializers.DictField()
+    warnings = serializers.ListField(child=serializers.CharField(), required=False)
+    error = serializers.CharField(required=False)
+    generated_at = serializers.DateTimeField()
+
+
+class ELDLogCertificationSerializer(serializers.Serializer):
+    """Serializer for ELD log certification requests"""
+    
+    certification_signature = serializers.CharField(
+        max_length=5000,
+        required=False,
+        help_text="Digital signature data (base64 encoded image or signature hash)"
+    )
+    certification_notes = serializers.CharField(
+        max_length=1000,
+        required=False,
+        help_text="Optional notes from driver about certification"
+    )
+
+
+class ELDLogEditRequestSerializer(serializers.Serializer):
+    """Serializer for ELD log edit requests"""
+    
+    log_entry_id = serializers.IntegerField()
+    field_name = serializers.ChoiceField(
+        choices=[
+            'start_time', 'end_time', 'duty_status', 'start_location', 
+            'end_location', 'manual_remarks', 'odometer_start', 'odometer_end'
+        ]
+    )
+    new_value = serializers.CharField(max_length=500)
+    edit_reason = serializers.CharField(
+        max_length=500,
+        help_text="Reason for manual edit"
+    )
+
+
+class ELDExportRequestSerializer(serializers.Serializer):
+    """Serializer for ELD log export requests"""
+    
+    export_format = serializers.ChoiceField(
+        choices=[
+            ('pdf', 'PDF Document'),
+            ('csv', 'CSV Data'),
+            ('json', 'JSON Data'),
+            ('xml', 'XML Data'),
+            ('dot_format', 'DOT Compliant Format')
+        ],
+        default='pdf'
+    )
+    export_purpose = serializers.ChoiceField(
+        choices=[
+            ('dot_inspection', 'DOT Inspection'),
+            ('driver_record', 'Driver Personal Record'),
+            ('fleet_audit', 'Fleet Management Audit'),
+            ('compliance_review', 'Compliance Review'),
+            ('backup', 'Data Backup'),
+            ('other', 'Other Purpose')
+        ],
+        default='driver_record'
+    )
+    date_range_start = serializers.DateField(required=False)
+    date_range_end = serializers.DateField(required=False)
+    include_violations = serializers.BooleanField(default=True)
+    include_location_remarks = serializers.BooleanField(default=True)
+    inspection_reference = serializers.CharField(
+        max_length=100,
+        required=False,
+        help_text="DOT inspection reference number (if applicable)"
+    )
+    notes = serializers.CharField(
+        max_length=1000,
+        required=False,
+        help_text="Additional notes about this export"
+    )
+
+
+class ELDExportResponseSerializer(serializers.Serializer):
+    """Serializer for ELD export responses"""
+    
+    success = serializers.BooleanField()
+    export_id = serializers.UUIDField(required=False)
+    file_name = serializers.CharField(required=False)
+    file_size_bytes = serializers.IntegerField(required=False)
+    download_url = serializers.URLField(required=False)
+    export_format = serializers.CharField(required=False)
+    logs_exported = serializers.IntegerField(required=False)
+    date_range = serializers.DictField(required=False)
+    error = serializers.CharField(required=False)
+    expires_at = serializers.DateTimeField(required=False)

@@ -1,10 +1,11 @@
 #trip_api/admin.py
 
 from django.contrib import admin
-from .models import Trip, Route, Stops, HOSPeriod, ComplianceReport
+from .models import Trip, Route, Stops, HOSPeriod, ComplianceReport, ELDLogEntry, ELDDailyLog, ELDLocationRemark, ELDExportRecord, ELDComplianceViolation
 from users.models import DriverCycleStatus, DailyDrivingRecord
 from .services.DriverCycleStatusService import DriverCycleStatusService
 from django.utils.html import format_html
+from django.utils import timezone
 
 
 @admin.register(Trip)
@@ -328,3 +329,75 @@ class DailyDrivingRecordAdmin(admin.ModelAdmin):
             'fields': ['created_at', 'updated_at']
         })
     ]
+
+@admin.register(ELDDailyLog)
+class ELDDailyLogAdmin(admin.ModelAdmin):
+    list_display = ['log_date', 'driver_name', 'trip', 'is_certified', 'is_compliant', 'compliance_score']
+    list_filter = ['log_date', 'is_certified', 'is_compliant', 'auto_generated']
+    search_fields = ['driver_name', 'trip__trip_id', 'carrier_name']
+    readonly_fields = ['log_id', 'generated_at', 'updated_at']
+    
+    fieldsets = (
+        ('Basic Information', {
+            'fields': ('log_id', 'trip', 'log_date')
+        }),
+        ('Driver Information', {
+            'fields': ('driver', 'driver_name', 'driver_license_number', 'driver_license_state', 'employee_id')
+        }),
+        ('Company Information', {
+            'fields': ('carrier_name', 'carrier_address', 'dot_number', 'mc_number')
+        }),
+        ('Vehicle Information', {
+            'fields': ('vehicle_id', 'license_plate', 'vin', 'vehicle_make_model')
+        }),
+        ('Daily Totals', {
+            'fields': ('total_off_duty_hours', 'total_sleeper_berth_hours', 'total_driving_hours', 
+                      'total_on_duty_not_driving_hours', 'total_on_duty_hours', 'total_distance_miles')
+        }),
+        ('Shipping Documents', {
+            'fields': ('bill_of_lading', 'manifest_number', 'pickup_number', 'delivery_receipt', 
+                      'commodity_description', 'cargo_weight', 'is_hazmat'),
+            'classes': ['collapse']
+        }),
+        ('Compliance', {
+            'fields': ('is_compliant', 'compliance_score', 'violation_count', 'warning_count')
+        }),
+        ('Certification', {
+            'fields': ('is_certified', 'certified_at', 'certification_signature', 'certification_statement')
+        }),
+        ('Administrative', {
+            'fields': ('auto_generated', 'manual_edits_count', 'last_edited_by', 'last_edited_at', 
+                      'generated_at', 'updated_at'),
+            'classes': ['collapse']
+        })
+    )
+
+@admin.register(ELDLogEntry)
+class ELDLogEntryAdmin(admin.ModelAdmin):
+    list_display = ['daily_log', 'start_time', 'end_time', 'duty_status', 'duration_hours', 'location_type']
+    list_filter = ['duty_status', 'location_type', 'is_compliant', 'was_manually_edited']
+    search_fields = ['daily_log__driver_name', 'start_location', 'end_location']
+    
+@admin.register(ELDLocationRemark)
+class ELDLocationRemarkAdmin(admin.ModelAdmin):
+    list_display = ['daily_log', 'time', 'location', 'location_type', 'duty_status']
+    list_filter = ['location_type', 'duty_status', 'auto_generated']
+    search_fields = ['location', 'remarks']
+
+@admin.register(ELDComplianceViolation)
+class ELDComplianceViolationAdmin(admin.ModelAdmin):
+    list_display = ['daily_log', 'violation_type', 'severity', 'is_resolved', 'detected_at']
+    list_filter = ['violation_type', 'severity', 'is_resolved', 'detected_at']
+    search_fields = ['description', 'daily_log__driver_name']
+    actions = ['mark_resolved']
+    
+    def mark_resolved(self, request, queryset):
+        queryset.update(is_resolved=True, resolved_at=timezone.now(), resolved_by=request.user)
+    mark_resolved.short_description = "Mark selected violations as resolved"
+
+@admin.register(ELDExportRecord)
+class ELDExportRecordAdmin(admin.ModelAdmin):
+    list_display = ['export_id', 'exported_by', 'export_format', 'export_purpose', 'exported_at']
+    list_filter = ['export_format', 'export_purpose', 'is_for_dot_inspection', 'exported_at']
+    search_fields = ['file_name', 'exported_by__username', 'inspection_reference']
+    readonly_fields = ['export_id', 'exported_at', 'file_checksum']
