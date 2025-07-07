@@ -1,3 +1,5 @@
+/* eslint-disable @typescript-eslint/no-explicit-any */
+
 import { useState } from "react";
 import { useParams, Link, useNavigate } from "react-router-dom";
 import { Layout } from "../components/Layout/Layout";
@@ -27,6 +29,7 @@ import {
   AlertCircle,
   Trash2,
   Settings,
+  Plus,
 } from "lucide-react";
 import {
   useGetTripDetails,
@@ -34,12 +37,19 @@ import {
   useDeleteTrip,
 } from "../hooks/useTripQueries";
 import { useTripCalculation } from "../hooks/useTripCalculation";
-import { useELDLogs } from "../hooks/useELDLogs";
+import {
+  useTripELDLogs,
+  useGenerateELDLogs,
+  useCertifyELDLog,
+  useEditELDLogEntry,
+  useExportTripELDLogs,
+} from "../hooks/useELDLogs";
 import { ELDLogViewer } from "../components/ELDLogs/ELDLogViewer";
+// import { ELDLogSummary } from "../components/ELDLogs/ELDLogSummary";
 import { RouteMap } from "../components/Maps/RouteMap";
 import { useMap } from "../hooks/useMap";
 import { TripActions } from "../components/UI/TripActions";
-import type { RoutePlanStop } from "../types";
+import type { RoutePlanStop, TripELDLogsResponse } from "../types";
 import type { LatLngExpression } from "leaflet";
 
 type TabType = "overview" | "map" | "stops" | "hos" | "compliance" | "eld_logs";
@@ -48,6 +58,7 @@ export function TripDetailPage() {
   const { tripId } = useParams<{ tripId: string }>();
   const navigate = useNavigate();
   const [activeTab, setActiveTab] = useState<TabType>("overview");
+  const [selectedLogIndex, setSelectedLogIndex] = useState(0);
 
   const {
     data: tripResponse,
@@ -80,31 +91,22 @@ export function TripDetailPage() {
   });
 
   const {
-    eldData,
+    data: eldLogsData,
     isLoading: isELDLoading,
+    isError: isELDError,
     error: eldError,
-    generateLogs,
-    downloadPDF,
-    clearError: clearELDError,
-  } = useELDLogs(tripId!, {
-    onSuccess: () => {
-      console.log("ELD logs generated successfully");
-    },
-    onError: (error) => {
-      console.error("ELD generation error:", error);
-    },
-  });
+  } = useTripELDLogs(tripId || "");
+
+  const generateELDMutation = useGenerateELDLogs();
+  const certifyLogMutation = useCertifyELDLog();
+  const editLogEntryMutation = useEditELDLogEntry();
+  const exportTripLogsMutation = useExportTripELDLogs();
 
   const trip = tripResponse?.trip;
+  console.log("trips data:", trip);
   const complianceReport = complianceResponse?.compliance_report;
 
-  const {
-    routeCoordinates,
-    routeStops,
-    // userLocation,
-    // getCurrentUserLocation,
-    // hasRoute
-  } = useMap({ trip });
+  const { routeCoordinates, routeStops } = useMap({ trip });
 
   const getStatusBadge = (status: string) => {
     const baseClasses =
@@ -161,27 +163,82 @@ export function TripDetailPage() {
     }
   };
 
-  const handleGenerateELD = async () => {
-    clearELDError();
-    try {
-      const result = await generateLogs({
-        export_format: "json",
-        include_validation: true,
-      });
+  const handleGenerateELDLogs = async () => {
+    if (!tripId) return;
 
-      if (result?.success) {
-        console.log("ELD logs generated successfully");
-      }
+    try {
+      await generateELDMutation.mutateAsync({
+        tripId,
+        options: {
+          save_to_database: true,
+          include_compliance_validation: true,
+          export_format: "json",
+        },
+      });
     } catch (error) {
-      console.error("Error generating ELD logs:", error);
+      console.error("Failed to generate ELD Logs:", error);
     }
   };
 
-  const handleDownloadELD = async () => {
+  const handleCertifyLog = async (
+    logId: string,
+    signature?: string,
+    notes?: string
+  ) => {
     try {
-      await downloadPDF();
+      await certifyLogMutation.mutateAsync({
+        logId,
+        request: {
+          certification_signature: signature,
+          certification_notes: notes,
+        },
+      });
     } catch (error) {
-      console.error("Error downloading ELD PDF:", error);
+      console.error("Failed to certify log:", error);
+      throw error;
+    }
+  };
+
+  const handleEditLogEntry = async (
+    logId: string,
+    entryId: number,
+    field: string,
+    value: string,
+    reason: string
+  ) => {
+    try {
+      await editLogEntryMutation.mutateAsync({
+        logId,
+        request: {
+          log_entry_id: entryId,
+          field_name: field as any,
+          new_value: value,
+          edit_reason: reason,
+        },
+      });
+    } catch (error) {
+      console.error("Failed to edit log entry:", error);
+      throw error;
+    }
+  };
+
+  const handleExportTripLogs = async (format: string, purpose: string) => {
+    if (!tripId) return;
+
+    try {
+      const response = await exportTripLogsMutation.mutateAsync({
+        tripId,
+        request: {
+          export_format: format as any,
+          export_purpose: purpose as any,
+        },
+      });
+
+      if (response.download_url) {
+        window.open(response.download_url, "_blank");
+      }
+    } catch (error) {
+      console.error("Failed to export trip logs:", error);
     }
   };
 
@@ -352,7 +409,7 @@ export function TripDetailPage() {
                 </Button>
               </Link>
             )}
-            <Button
+            {/* <Button
               variant="secondary"
               leftIcon={<Download className="w-4 h-4" />}
               onClick={handleGenerateELD}
@@ -360,7 +417,7 @@ export function TripDetailPage() {
               disabled={isELDLoading || !trip.hos_periods.length}
             >
               {eldData ? "Refresh ELD" : "Generate ELD"}
-            </Button>
+            </Button> */}
           </div>
         </div>
 
@@ -382,7 +439,7 @@ export function TripDetailPage() {
                       Route Optimization: {optimizationError}
                     </p>
                   )}
-                  {eldError && (
+                  {/* {eldError && (
                     <p className="text-sm text-red-700 mt-1">
                       ELD Generation: {eldError}
                     </p>
@@ -397,7 +454,7 @@ export function TripDetailPage() {
                     className="mt-2 text-red-700 hover:text-red-800"
                   >
                     Dismiss
-                  </Button>
+                  </Button> */}
                 </div>
               </div>
             </CardContent>
@@ -443,6 +500,17 @@ export function TripDetailPage() {
                     )}
                   </div>
                 </div>
+              )}
+
+              {trip.status === "completed" && !eldLogsData?.logs?.length && (
+                <Button
+                  onClick={handleGenerateELDLogs}
+                  isLoading={generateELDMutation.isPending}
+                  leftIcon={<FileText className="w-4 h-4" />}
+                  className="bg-grren-600 hover:bg-green-700"
+                >
+                  Generate ELD Logs
+                </Button>
               )}
 
               {/* Trip Completion Actions */}
@@ -580,7 +648,7 @@ export function TripDetailPage() {
               >
                 <tab.icon className="w-4 h-4" />
                 <span>{tab.label}</span>
-                {tab.id === "eld_logs" && eldData && (
+                {tab.id === "eld_logs" && eldLogsData && (
                   <span className="inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium bg-green-100 text-green-800">
                     ✓
                   </span>
@@ -1367,17 +1435,6 @@ export function TripDetailPage() {
                 <Button
                   className="w-full justify-start"
                   variant="ghost"
-                  onClick={handleGenerateELD}
-                  isLoading={isELDLoading}
-                  disabled={isELDLoading || !trip.hos_periods.length}
-                >
-                  <Download className="w-4 h-4 mr-2" />
-                  {isELDLoading ? "Generating..." : "Download ELD Logs"}
-                </Button>
-
-                <Button
-                  className="w-full justify-start"
-                  variant="ghost"
                   onClick={() => {
                     // This would open a compliance report modal or navigate to report page
                     console.log("Generate compliance report");
@@ -1437,76 +1494,153 @@ export function TripDetailPage() {
         )}
 
         {activeTab === "eld_logs" && (
-          <div className="space-y-6">
-            {/* Generate ELD Action */}
-            {!eldData && trip.hos_periods.length > 0 && (
-              <Card>
-                <CardHeader>
-                  <CardTitle className="flex items-center">
-                    <FileText className="w-5 h-5 mr-2" />
-                    Generate ELD Logs
-                  </CardTitle>
-                </CardHeader>
-                <CardContent>
-                  <div className="flex items-center justify-between">
-                    <div>
-                      <p className="text-gray-600 mb-2">
-                        Generate Electronic Logging Device (ELD) logs for this
-                        trip.
-                      </p>
-                      <p className="text-sm text-gray-500">
-                        This will create visual log sheets showing duty status
-                        changes and compliance data.
-                      </p>
-                    </div>
-                    <Button
-                      leftIcon={<FileText className="w-4 h-4" />}
-                      onClick={handleGenerateELD}
-                      isLoading={isELDLoading}
-                      disabled={isELDLoading}
-                    >
-                      {isELDLoading ? "Generating..." : "Generate ELD Logs"}
-                    </Button>
-                  </div>
-                </CardContent>
-              </Card>
-            )}
-
-            <ELDLogViewer
-              eldData={eldData}
-              isLoading={isELDLoading}
-              error={eldError}
-              onDownload={handleDownloadELD}
-              onRefresh={handleGenerateELD}
-            />
-
-            {trip.hos_periods.length === 0 && (
-              <Card>
-                <CardContent className="p-6">
-                  <div className="text-center py-8">
-                    <FileText className="w-12 h-12 text-gray-400 mx-auto mb-4" />
-                    <h3 className="text-lg font-medium text-gray-900 mb-2">
-                      No HOS Data Available
-                    </h3>
-                    <p className="text-gray-600 mb-4">
-                      Calculate the trip route first to generate HOS periods and
-                      ELD logs.
-                    </p>
-                    <Button
-                      leftIcon={<Calculator className="w-4 h-4" />}
-                      onClick={handleCalculateRoute}
-                      isLoading={isCalculating}
-                      disabled={isCalculating}
-                    >
-                      Calculate Route
-                    </Button>
-                  </div>
-                </CardContent>
-              </Card>
-            )}
-          </div>
+          <TripELDLogsSection
+            tripId={tripId || ""}
+            tripStatus={trip.status}
+            eldLogsData={eldLogsData}
+            isLoading={isELDLoading}
+            isError={isELDError}
+            error={eldError}
+            selectedLogIndex={selectedLogIndex}
+            onLogSelect={setSelectedLogIndex}
+            onGenerateLogs={handleGenerateELDLogs}
+            onCertifyLog={handleCertifyLog}
+            onEditLogEntry={handleEditLogEntry}
+            onExportAll={() => handleExportTripLogs("pdf", "driver_record")}
+            isGenerating={generateELDMutation.isPending}
+            isCertifying={certifyLogMutation.isPending}
+            isEditing={editLogEntryMutation.isPending}
+            isExporting={exportTripLogsMutation.isPending}
+          />
         )}
       </div>
     </Layout>
+  );
+}
+
+interface TripELDLogsSectionProps {
+  tripId: string;
+  tripStatus: string;
+  eldLogsData: TripELDLogsResponse | undefined;
+  isLoading: boolean;
+  isError: boolean;
+  error: Error | null;
+  selectedLogIndex: number;
+  onLogSelect: (index: number) => void;
+  onGenerateLogs: () => void;
+  onCertifyLog: (
+    logId: string,
+    signature?: string,
+    notes?: string
+  ) => Promise<void>;
+  onEditLogEntry: (
+    logId: string,
+    entryId: number,
+    field: string,
+    value: string,
+    reason: string
+  ) => Promise<void>;
+  onExportAll: () => Promise<void>;
+  isGenerating: boolean;
+  isCertifying: boolean;
+  isEditing: boolean;
+  isExporting: boolean;
+}
+
+function TripELDLogsSection({
+  // tripId,
+  tripStatus,
+  eldLogsData,
+  isLoading,
+  isError,
+  error,
+  selectedLogIndex,
+  // onLogSelect,
+  onGenerateLogs,
+  isGenerating,
+  // isExporting,
+}: TripELDLogsSectionProps) {
+  if (isLoading) {
+    return (
+      <div className="flex items-center justify-center py-12">
+        <LoadingSpinner size="large" text="Loading ELD logs..." />
+      </div>
+    );
+  }
+
+  if (isError) {
+    return (
+      <Card className="border-red-200 bg-red-50">
+        <CardContent className="p-6">
+          <div className="flex items-center space-x-3">
+            <AlertTriangle className="w-8 h-8 text-red-600" />
+            <div>
+              <h3 className="text-lg font-medium text-red-800">
+                Failed to Load ELD Logs
+              </h3>
+              <p className="text-red-700 mt-1">
+                {error?.message || "Unable to load ELD logs for this trip"}
+              </p>
+            </div>
+          </div>
+        </CardContent>
+      </Card>
+    );
+  }
+
+  // No logs exist yet
+  if (!eldLogsData?.logs || eldLogsData.logs.length === 0) {
+    return (
+      <div className="space-y-6">
+        <Card>
+          <CardHeader>
+            <div className="flex justify-between items-center">
+              <CardTitle className="flex items-center">
+                <FileText className="w-5 h-5 mr-2" />
+                ELD Logs
+              </CardTitle>
+            </div>
+          </CardHeader>
+          <CardContent>
+            <div className="text-center py-12">
+              <FileText className="w-16 h-16 text-gray-400 mx-auto mb-4" />
+              <h3 className="text-lg font-medium text-gray-900 mb-2">
+                No ELD Logs Generated
+              </h3>
+              <p className="text-gray-600 mb-6">
+                {tripStatus === "completed"
+                  ? "Generate ELD logs from this completed trip."
+                  : "Complete the trip and calculate the route to generate ELD logs."}
+              </p>
+
+              {tripStatus === "completed" && (
+                <Button
+                  onClick={onGenerateLogs}
+                  isLoading={isGenerating}
+                  leftIcon={<Plus className="w-4 h-4" />}
+                  className="bg-blue-600 hover:bg-blue-700"
+                >
+                  {isGenerating ? "Generating..." : "Generate ELD Logs"}
+                </Button>
+              )}
+            </div>
+          </CardContent>
+        </Card>
+      </div>
+    );
+  }
+
+  const dailyLogs = eldLogsData.logs;
+  const currentLog = dailyLogs[selectedLogIndex];
+
+  return (
+    <div className="space-y-6">
+      {/* Current Log Viewer */}
+      {currentLog && (
+        <ELDLogViewer
+          dailyLog={currentLog}
+        />
+      )}
+    </div>
   );
 }

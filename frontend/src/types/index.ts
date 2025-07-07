@@ -1,3 +1,4 @@
+/* eslint-disable @typescript-eslint/no-explicit-any */
 import type { LatLngExpression } from "leaflet";
 
 // User and auth types
@@ -874,4 +875,318 @@ export interface RouteCoordinate {
   latitude: number;
   longitude: number;
   elevation?: number;
+}
+
+export interface ELDLogEntry {
+  id: number;
+  daily_log: string;
+  hos_period?: number;
+  start_time: string;
+  end_time: string;
+  duty_status: 'off_duty' | 'sleeper_berth' | 'driving' | 'on_duty_not_driving';
+  duty_status_label: string;
+  duty_status_symbol: number;
+  duty_status_color: string;
+  duration_minutes: number;
+  duration_hours: number;
+  start_location: string;
+  end_location: string;
+  location_type: 'trip_start' | 'pickup' | 'delivery' | 'fuel_stop' | 'rest_area' | 'intermediate_stop' | 'unknown';
+  odometer_start: number;
+  odometer_end: number;
+  vehicle_miles: number;
+  remarks: string;
+  auto_generated_remarks: string;
+  manual_remarks: string;
+  grid_row: number;
+  grid_column_start: number;
+  grid_column_end: number;
+  is_compliant: boolean;
+  compliance_notes: string;
+  was_manually_edited: boolean;
+  original_auto_data: Record<string, any>;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface ELDLocationRemark {
+  id: number;
+  daily_log: string;
+  log_entry: number;
+  time: string;
+  location: string;
+  location_type: 'trip_start' | 'pickup' | 'delivery' | 'fuel_stop' | 'rest_area' | 'state_line' | 'weigh_station' | 'intermediate_stop' | 'duty_status_change';
+  location_type_display: string;
+  odometer_reading: number;
+  duty_status: 'off_duty' | 'sleeper_berth' | 'driving' | 'on_duty_not_driving';
+  duty_status_display: string;
+  remarks: string;
+  auto_generated: boolean;
+  is_duty_status_change: boolean;
+  created_at: string;
+}
+
+export interface ELDComplianceViolation {
+  id: number;
+  daily_log: string;
+  log_entry?: number; 
+  violation_type: 'daily_driving_limit' | 'daily_on_duty_limit' | 'insufficient_off_duty' | 'missing_30min_break' | 'weekly_driving_limit' | 'daily_time_accounting' | 'missing_location_change' | 'invalid_duty_status';
+  violation_type_display: string;
+  severity: 'critical' | 'major' | 'minor' | 'warning';
+  severity_display: string;
+  description: string;
+  actual_value?: number;
+  limit_value?: number;
+  violation_amount?: number;
+  is_resolved: boolean;
+  resolution_notes: string;
+  resolved_at?: string;
+  resolved_by?: string;
+  resolved_by_name?: string;
+  detected_at: string;
+}
+
+export interface ELDDailyLog {
+  log_id: string;
+  trip: string;
+  log_date: string;
+  driver: string;
+  driver_name_display: string;
+  
+  driver_name: string;
+  driver_license_number: string;
+  driver_license_state: string;
+  employee_id: string;
+  
+  carrier_name: string;
+  carrier_address: string;
+  dot_number: string;
+  mc_number: string;
+  
+  vehicle_id: string;
+  license_plate: string;
+  vin: string;
+  vehicle_make_model: string;
+  
+  total_off_duty_hours: number;
+  total_sleeper_berth_hours: number;
+  total_driving_hours: number;
+  total_on_duty_not_driving_hours: number;
+  total_on_duty_hours: number;
+  total_distance_miles: number;
+  
+
+  bill_of_lading: string;
+  manifest_number: string;
+  pickup_number: string;
+  delivery_receipt: string;
+  commodity_description: string;
+  cargo_weight: string;
+  is_hazmat: boolean;
+  
+  is_compliant: boolean;
+  compliance_score: number;
+  compliance_grade: string;
+  violation_count: number;
+  warning_count: number;
+  
+  is_certified: boolean;
+  certified_at?: string;
+  certification_signature: string;
+  certification_statement: string;
+  
+  auto_generated: boolean;
+  manual_edits_count: number;
+  last_edited_by?: string;
+  last_edited_at?: string;
+  generated_at: string;
+  updated_at: string;
+  
+  log_entries: ELDLogEntry[];
+  location_remarks: ELDLocationRemark[];
+  compliance_violations: ELDComplianceViolation[];
+}
+
+export interface ELDDailyLogSummary {
+  log_id: string;
+  log_date: string;
+  driver_name_display: string;
+  trip_id: string;
+  total_driving_hours: number;
+  total_on_duty_hours: number;
+  total_distance_miles: number;
+  is_compliant: boolean;
+  compliance_score: number;
+  compliance_grade: string;
+  violation_count: number;
+  is_certified: boolean;
+  certified_at?: string;
+  auto_generated: boolean;
+}
+
+export interface ELDExportRecord {
+  export_id: string;
+  daily_logs: string[];
+  trip?: string;
+  export_format: 'pdf' | 'csv' | 'json' | 'xml' | 'dot_format';
+  export_purpose: 'dot_inspection' | 'driver_record' | 'fleet_audit' | 'compliance_review' | 'backup' | 'other';
+  date_range_start: string;
+  date_range_end: string;
+  file_name: string;
+  file_size_bytes: number;
+  file_checksum: string;
+  exported_by: string;
+  exported_at: string;
+  notes: string;
+  is_for_dot_inspection: boolean;
+  inspection_reference: string;
+}
+
+// Request/Response types for API calls
+export interface ELDLogGenerationRequest {
+  save_to_database?: boolean;
+  include_compliance_validation?: boolean;
+  auto_certify?: boolean;
+  export_format?: 'json' | 'pdf_data';
+  generate_missing_only?: boolean;
+}
+
+export interface ELDLogGenerationResponse {
+  success: boolean;
+  trip_id: string;
+  logs_generated: number;
+  logs_updated: number;
+  total_days: number;
+  log_date_range: {
+    start: string;
+    end: string;
+  };
+  daily_logs: ELDDailyLog[];
+  compliance_summary: {
+    is_compliant: boolean;
+    total_violations: number;
+    total_warnings: number;
+    daily_validations: Array<{
+      log_date: string;
+      is_compliant: boolean;
+      violations: ELDComplianceViolation[];
+      warnings: any[];
+      totals_checked: Record<string, number>;
+      compliance_score: number;
+    }>;
+  };
+  warnings?: string[];
+  error?: string;
+  generated_at: string;
+}
+
+export interface ELDLogCertificationRequest {
+  certification_signature?: string;
+  certification_notes?: string;
+}
+
+export interface ELDLogCertificationResponse {
+  success: boolean;
+  message: string;
+  certified_at: string;
+  log_id: string;
+}
+
+export interface ELDLogEditRequest {
+  log_entry_id: number;
+  field_name: 'start_time' | 'end_time' | 'duty_status' | 'start_location' | 'end_location' | 'manual_remarks' | 'odometer_start' | 'odometer_end';
+  new_value: string;
+  edit_reason: string;
+}
+
+export interface ELDLogEditResponse {
+  success: boolean;
+  message: string;
+  log_entry_id: number;
+  field_updated: string;
+  new_value: string;
+}
+
+export interface ELDExportRequest {
+  export_format: 'pdf' | 'csv' | 'json' | 'xml' | 'dot_format';
+  export_purpose: 'dot_inspection' | 'driver_record' | 'fleet_audit' | 'compliance_review' | 'backup' | 'other';
+  date_range_start?: string;
+  date_range_end?: string;
+  include_violations?: boolean;
+  include_location_remarks?: boolean;
+  inspection_reference?: string;
+  notes?: string;
+}
+
+export interface ELDExportResponse {
+  success: boolean;
+  export_id?: string;
+  file_name?: string;
+  file_size_bytes?: number;
+  download_url?: string;
+  export_format?: string;
+  logs_exported?: number;
+  date_range?: {
+    start: string;
+    end: string;
+  };
+  error?: string;
+  expires_at?: string;
+}
+
+export interface ELDComplianceSummary {
+  date_range: {
+    start: string;
+    end: string;
+  };
+  statistics: {
+    total_logs: number;
+    compliant_logs: number;
+    compliance_rate: number;
+    certified_logs: number;
+    certification_rate: number;
+    total_violations: number;
+    average_compliance_score: number;
+  };
+  violation_breakdown: Record<string, number>;
+  recent_logs: ELDDailyLogSummary[];
+}
+
+// Trip ELD Logs response type
+export interface TripELDLogsResponse {
+  success: boolean;
+  trip_id: string;
+  total_days: number;
+  logs: ELDDailyLog[];
+  summary: {
+    total_driving_hours: number;
+    total_on_duty_hours: number;
+    total_distance_miles: number;
+    compliance_rate: number;
+    certification_rate: number;
+    compliant_logs: number;
+    certified_logs: number;
+  };
+}
+
+// Paginated response type for ELD logs list
+export interface ELDLogsPaginatedResponse {
+  count: number;
+  next: string | null;
+  previous: string | null;
+  results: ELDDailyLogSummary[];
+}
+
+// Grid data type for ELD visualization
+export interface ELDGridData {
+  time: string;
+  minute_of_day: number;
+  duty_status: string;
+  duty_status_label: string;
+  duty_status_symbol: number;
+  duty_status_color: string;
+  grid_row: number;
+  grid_column: number;
+  entry_id?: number;
+  location?: string;
 }
