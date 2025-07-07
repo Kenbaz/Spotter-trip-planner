@@ -790,45 +790,6 @@ class ELDDailyLog(models.Model):
 
     def save(self, *args, **kwargs):
         super().save(*args, **kwargs)
-        
-        # Recalculate totals from log entries
-        if hasattr(self, 'log_entries'):
-            self.recalculate_daily_totals()
-    
-    def recalculate_daily_totals(self):
-        """Recalculate daily totals from associated log entries"""
-        entries = self.log_entries.all()
-
-        totals = {
-            'off_duty': 0,
-            'sleeper_berth': 0,
-            'driving': 0,
-            'on_duty_not_driving': 0,
-            'distance': 0
-        }
-
-        for entry in entries:
-            duty_status = entry.duty_status
-            hours = entry.duration_hours
-
-            if duty_status in totals:
-                totals[duty_status] += hours
-            
-            totals['distance'] += entry.vehicle_miles or 0
-        
-        # Update fields
-        self.total_off_duty_hours = totals['off_duty']
-        self.total_sleeper_berth_hours = totals['sleeper_berth']
-        self.total_driving_hours = totals['driving']
-        self.total_on_duty_not_driving_hours = totals['on_duty_not_driving']
-        self.total_on_duty_hours = totals['driving'] + totals['on_duty_not_driving']
-        self.total_distance_miles = totals['distance']
-        
-        self.save(update_fields=[
-            'total_off_duty_hours', 'total_sleeper_berth_hours',
-            'total_driving_hours', 'total_on_duty_not_driving_hours',
-            'total_on_duty_hours', 'total_distance_miles'
-        ])
     
     def certify_log(self, signature_data: str = None):
         """Certify the log with driver signature"""

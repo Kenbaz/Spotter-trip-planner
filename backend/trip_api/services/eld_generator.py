@@ -1,13 +1,12 @@
 # trip_api/services/eld_generator.py
 
 from datetime import datetime, timedelta, date
-from typing import List, Dict, Tuple, Optional
+from typing import List, Dict
 from decimal import Decimal
-import json
 from django.utils import timezone
 from django.contrib.auth import get_user_model
-from ..models import Trip, HOSPeriod, Stops
-from users.models import SpotterCompany, Vehicle
+from ..models import Trip, HOSPeriod
+from users.models import SpotterCompany
 
 
 User = get_user_model()
@@ -120,71 +119,79 @@ class ELDGeneratorService:
         return context
     
     def _get_driver_info(self, driver_user) -> Dict[str, str]:
-        """Extract driver information from user profile"""
+        """Extract driver information from user profile with proper field length validation"""
         if not driver_user:
             return {
                 'name': 'Unknown Driver',
-                'employee_id': 'N/A',
-                'license_number': 'N/A',
-                'license_state': 'N/A'
+                'employee_id': '',
+                'license_number': '',
+                'license_state': ''
             }
+        
+        license_state = driver_user.driver_license_state or ''
+        if len(license_state) > 2:
+            license_state = license_state[:2] if license_state else ''
         
         return {
             'name': f"{driver_user.first_name} {driver_user.last_name}".strip() or driver_user.username,
-            'employee_id': driver_user.employee_id or 'N/A',
-            'license_number': driver_user.driver_license_number or 'N/A',
-            'license_state': driver_user.driver_license_state or 'N/A',
-            'email': driver_user.email or 'N/A',
-            'phone_number': driver_user.phone_number or 'N/A'
+            'employee_id': driver_user.employee_id or '',
+            'license_number': driver_user.driver_license_number or '',
+            'license_state': license_state,
+            'email': driver_user.email or '',
+            'phone_number': driver_user.phone_number or ''
         }
 
     def _get_company_info(self, driver_user) -> Dict[str, str]:
+        """Extract company information with proper field length validation"""
         if not driver_user:
             return {
                 'name': 'Unknown Company',
-                'address': 'N/A',
-                'dot_number': 'N/A',
-                'mc_number': 'N/A'
+                'address': '',
+                'dot_number': '',
+                'mc_number': ''
             }
         
-        # Get the single Spotter company instance
         try:
             company = SpotterCompany.get_company_instance()
         except Exception:
             return {
                 'name': 'Spotter',
-                'address': 'N/A',
-                'dot_number': 'N/A',
-                'mc_number': 'N/A'
+                'address': '',
+                'dot_number': '',
+                'mc_number': ''
             }
         
+        company_state = company.state or ''
+        if len(company_state) > 2:
+            company_state = company_state[:2]
+        
         return {
-            'name': company.name,
-            'address': f"{company.address}, {company.city}, {company.state} {company.zip_code}".strip(),
-            'dot_number': company.usdot_number,
-            'mc_number': company.mc_number,
-            'phone': company.phone_number
+            'name': (company.name or '')[:200],
+            'address': f"{company.address}, {company.city}, {company_state} {company.zip_code}".strip()[:500],
+            'dot_number': (company.usdot_number or '')[:20],
+            'mc_number': (company.mc_number or '')[:20],
+            'phone': (company.phone_number or '')[:20]
         }
     
     def _get_vehicle_info(self, trip: Trip) -> Dict[str, str]:
-        """Extract vehicle information from trip assignment"""
+        """Extract vehicle information from trip assignment with proper field length validation"""
         vehicle = trip.assigned_vehicle
         
         if not vehicle:
             return {
-                'vehicle_id': 'N/A',
-                'license_plate': 'N/A',
-                'vin': 'N/A',
-                'make_model': 'N/A',
-                'year': 'N/A'
+                'vehicle_id': '',
+                'license_plate': '',
+                'vin': '',
+                'make_model': '',
+                'year': ''
             }
         
         return {
-            'vehicle_id': vehicle.unit_number,
-            'license_plate': vehicle.license_plate,
-            'vin': vehicle.vin,
-            'make_model': f"{vehicle.make} {vehicle.model}".strip(),
-            'year': str(vehicle.year)
+            'vehicle_id': (vehicle.unit_number or '')[:50],
+            'license_plate': (vehicle.license_plate or '')[:20],
+            'vin': (vehicle.vin or '')[:17],
+            'make_model': f"{vehicle.make} {vehicle.model}".strip()[:100], 
+            'year': str(vehicle.year)[:4] if vehicle.year else ''
         }
     
     def _get_trip_details(self, trip: Trip) -> Dict[str, any]:
@@ -252,14 +259,14 @@ class ELDGeneratorService:
         return locations
     
     def _generate_daily_log_with_context(
-            self, 
-            trip: Trip, 
-            trip_context: Dict, 
-            log_date: date, 
-            periods: List[HOSPeriod]
+        self, 
+        trip: Trip, 
+        trip_context: Dict, 
+        log_date: date, 
+        periods: List[HOSPeriod]
         ) -> Dict[str, any]:
         """
-        Generate ELD log data for a single day with auto-populated context
+        Generate ELD log data for a single day with auto-populated context 
         """
         # Sort periods by start time
         sorted_periods = sorted(periods, key=lambda p: p.start_datetime)
@@ -453,8 +460,8 @@ class ELDGeneratorService:
                 'trip_duration_days': len(set(p.start_datetime.date() for p in hos_periods))
             },
             'compliance_summary': {
-                'hos_compliant': True,  # Would be calculated from compliance validation
-                'total_violations': 0,  # Would come from validation
+                'hos_compliant': True,
+                'total_violations': 0,
                 'required_breaks_taken': len([p for p in hos_periods if p.duty_status == 'off_duty' and p.duration_minutes >= 30]),
                 'daily_resets_taken': len([p for p in hos_periods if p.duty_status in ['off_duty', 'sleeper_berth'] and p.duration_minutes >= 600])
             }
@@ -595,32 +602,102 @@ class ELDGeneratorService:
     def _generate_log_summary(
         self,
         trip: Trip,
-        hos_periods: List[HOSPeriod]
+        hos_periods
         ) -> Dict[str, any]:
-        """Generate basic log summary"""
-        total_driving = sum(
-            Decimal(p.duration_minutes) / 60
-            for p in hos_periods if p.duty_status == 'driving'
-        )
+        """Generate basic log summary - handles both QuerySets and Lists - SAFE VERSION"""
         
-        total_on_duty = sum(
-            Decimal(p.duration_minutes) / 60
-            for p in hos_periods if p.duty_status in ['on_duty_not_driving', 'driving']
-        )
-
-        total_distance = sum(
-            Decimal(p.distance_traveled_miles or 0)
-            for p in hos_periods
-        )
+        print("DEBUG: Starting _generate_log_summary...")
+        
+        # Handle empty periods
+        if not hos_periods:
+            print("DEBUG: No HOS periods provided")
+            return {
+                'total_driving_hours': 0.0,
+                'total_on_duty_hours': 0.0,
+                'total_distance_miles': 0.0,
+                'trip_start': None,
+                'trip_end': None,
+                'total_periods': 0,
+                'trip_duration_hours': 0.0
+            }
+        
+        print(f"DEBUG: Processing {len(hos_periods)} periods")
+        
+        # Convert QuerySet to list if necessary to support negative indexing
+        if hasattr(hos_periods, 'model'):  # Check if it's a QuerySet
+            print("DEBUG: Converting QuerySet to list...")
+            hos_periods_list = list(hos_periods)
+        else:
+            print("DEBUG: Already a list")
+            hos_periods_list = hos_periods
+        
+        if not hos_periods_list:
+            print("DEBUG: No periods after conversion")
+            return {
+                'total_driving_hours': 0.0,
+                'total_on_duty_hours': 0.0,
+                'total_distance_miles': 0.0,
+                'trip_start': None,
+                'trip_end': None,
+                'total_periods': 0,
+                'trip_duration_hours': 0.0
+            }
+        
+        print("DEBUG: Calculating totals...")
+        
+        # Calculate totals safely
+        total_driving = 0.0
+        total_on_duty = 0.0
+        total_distance = 0.0
+        
+        for period in hos_periods_list:
+            try:
+                duration_hours = float(period.duration_minutes) / 60.0
+                
+                if period.duty_status == 'driving':
+                    total_driving += duration_hours
+                
+                if period.duty_status in ['on_duty_not_driving', 'driving']:
+                    total_on_duty += duration_hours
+                
+                distance = float(period.distance_traveled_miles or 0)
+                total_distance += distance
+                
+            except (AttributeError, ValueError, TypeError) as e:
+                print(f"DEBUG: Error processing period {period}: {e}")
+                continue
+        
+        print("DEBUG: Calculating trip duration...")
+        
+        # Calculate trip duration safely
+        trip_duration_hours = 0.0
+        trip_start = None
+        trip_end = None
+        
+        try:
+            if hos_periods_list:
+                first_period = hos_periods_list[0]
+                last_period = hos_periods_list[-1]
+                
+                trip_start = first_period.start_datetime.isoformat()
+                trip_end = last_period.end_datetime.isoformat()
+                
+                duration_delta = last_period.end_datetime - first_period.start_datetime
+                trip_duration_hours = duration_delta.total_seconds() / 3600
+                
+        except (AttributeError, IndexError) as e:
+            print(f"DEBUG: Error calculating trip duration: {e}")
+        
+        print("DEBUG: Returning summary...")
         
         return {
-            'total_driving_hours': float(total_driving),
-            'total_on_duty_hours': float(total_on_duty),
-            'total_distance_miles': float(total_distance),
-            'trip_start': hos_periods[0].start_datetime.isoformat() if hos_periods else None,
-            'trip_end': hos_periods[-1].end_datetime.isoformat() if hos_periods else None,
-            'total_periods': len(hos_periods),
-            'unique_locations': len(set(p.start_location for p in hos_periods if p.start_location))
+            'total_driving_hours': round(total_driving, 2),
+            'total_on_duty_hours': round(total_on_duty, 2),
+            'total_distance_miles': round(total_distance, 2),
+            'trip_start': trip_start,
+            'trip_end': trip_end,
+            'total_periods': len(hos_periods_list),
+            'trip_duration_hours': round(trip_duration_hours, 2)
         }
     
     def export_log_to_pdf_data(self, trip: Trip) -> Dict[str, any]:

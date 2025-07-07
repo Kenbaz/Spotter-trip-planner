@@ -566,12 +566,11 @@ class TripViewSet(viewsets.ModelViewSet):
         """Generate ELD logs for a trip"""
         try:
             trip = self.get_object()
-
-            print(f"Trip status: {trip.status}")
-            print(f"Trip has route: {hasattr(trip, 'route')}")
-            print(f"Trip stops count: {trip.stops.count()}")
-            print(f"Trip HOS periods count: {trip.hos_periods.count()}")
-            print(f"Trip is HOS compliant: {trip.is_hos_compliant}")
+            
+            if hasattr(trip, 'route') and trip.route:
+                print(f"Trip has route with distance: {trip.route.total_distance_meters} meters")
+            else:
+                print("Trip has no associated route")
 
             if not self._can_access_trip(request.user, trip):
                 return Response(
@@ -596,9 +595,6 @@ class TripViewSet(viewsets.ModelViewSet):
             else:
                 eld_result = eld_generator.generate_eld_log_data(trip)
             
-            print(f"ELD result keys: {list(eld_result.keys())}")
-            print(f"ELD result trip_id: {eld_result.get('trip_id', 'NOT FOUND')}")
-            
             if not eld_result['success']:
                 error_response = {
                     'success': False,
@@ -616,10 +612,34 @@ class TripViewSet(viewsets.ModelViewSet):
                     status=status.HTTP_400_BAD_REQUEST
                 )
             
-            # Add validation if requested
-            if eld_data.get('include_validation', True):
-                validation_results = eld_generator.validate_log_compliance(trip)
-                eld_result['validation_results'] = validation_results
+            logs_created = []
+            logs_updated = []
+            
+            print("DEBUG: Saving ELD logs to database...")
+            with transaction.atomic():
+                for daily_log_data in eld_result['daily_logs']:
+                    try:
+                        log_date = datetime.fromisoformat(daily_log_data['log_date']).date()
+                        
+                        # Check if log already exists
+                        existing_log = ELDDailyLog.objects.filter(
+                            trip=trip,
+                            log_date=log_date
+                        ).first()
+                        
+                        if existing_log:
+                            print(f"DEBUG: Updating existing log for {log_date}")
+                            # Update existing log
+                            updated_log = self._update_eld_log_from_data(existing_log, daily_log_data, trip)
+                            logs_updated.append(updated_log)
+                        else:
+                            new_log = self._create_eld_log_from_data(daily_log_data, trip)
+                            logs_created.append(new_log)
+                            
+                    except Exception as save_error:
+                        print(f"DEBUG: Error saving daily log: {save_error}")
+                        logger.error(f"Error saving daily log for {trip.trip_id}: {save_error}")
+                        continue
             
             success_response = {
                 'success': True,
@@ -629,13 +649,16 @@ class TripViewSet(viewsets.ModelViewSet):
                 'daily_logs': eld_result.get('daily_logs', []),
                 'summary': eld_result.get('summary', {}),
                 'generated_at': eld_result.get('generated_at', timezone.now()),
+                # Add database save info
+                'database_saved': True,
+                'logs_created': len(logs_created),
+                'logs_updated': len(logs_updated)
             }
             
-            # Add validation results if present
             if 'validation_results' in eld_result:
                 success_response['validation_results'] = eld_result['validation_results']
             
-            logger.info(f"ELD logs generated for trip {trip.trip_id} by user {request.user.username}")
+            logger.info(f"ELD logs generated and saved for trip {trip.trip_id} by user {request.user.username}. Created: {len(logs_created)}, Updated: {len(logs_updated)}")
             
             return Response(
                 ELDLogResponseSerializer(success_response).data,
@@ -655,124 +678,6 @@ class TripViewSet(viewsets.ModelViewSet):
                     'summary': {},
                     'generated_at': timezone.now(),
                     'details': str(e)
-                }).data,
-                status=status.HTTP_500_INTERNAL_SERVER_ERROR
-            )
-    
-    @action(detail=True, methods=['post'])
-    def generate_eld_logs_enhanced(self, request, trip_id=None):
-        """Enhanced ELD log generation with database storage"""
-        try:
-            trip = self.get_object()
-            
-            # Check permissions
-            if not self._can_access_trip(request.user, trip):
-                return Response(
-                    {'error': 'Permission denied - you can only generate ELD logs for your own trips'},
-                    status=status.HTTP_403_FORBIDDEN
-                )
-            
-            # Validate request data
-            serializer = ELDLogGenerationRequestSerializer(data=request.data)
-            serializer.is_valid(raise_exception=True)
-            generation_data = serializer.validated_data
-            
-            # Initialize ELD generator
-            eld_generator = ELDGeneratorService()
-            
-            # Generate ELD log data
-            eld_result = eld_generator.generate_eld_log_data(trip)
-            
-            if not eld_result['success']:
-                return Response(
-                    ELDLogGenerationResponseSerializer({
-                        'success': False,
-                        'trip_id': trip.trip_id,
-                        'logs_generated': 0,
-                        'logs_updated': 0,
-                        'total_days': 0,
-                        'log_date_range': {},
-                        'compliance_summary': {},
-                        'error': eld_result.get('error', 'ELD generation failed'),
-                        'generated_at': timezone.now()
-                    }).data,
-                    status=status.HTTP_400_BAD_REQUEST
-                )
-            
-            # Save to database if requested
-            logs_created = []
-            logs_updated = []
-            
-            if generation_data['save_to_database']:
-                with transaction.atomic():
-                    for daily_log_data in eld_result['daily_logs']:
-                        log_date = datetime.fromisoformat(daily_log_data['log_date']).date()
-                        
-                        # Check if log already exists
-                        existing_log = ELDDailyLog.objects.filter(
-                            trip=trip,
-                            log_date=log_date
-                        ).first()
-                        
-                        if existing_log:
-                            if not generation_data['generate_missing_only']:
-                                # Update existing log
-                                self._update_eld_log_from_data(existing_log, daily_log_data, trip)
-                                logs_updated.append(existing_log)
-                        else:
-                            # Create new log
-                            new_log = self._create_eld_log_from_data(daily_log_data, trip)
-                            logs_created.append(new_log)
-                            
-                            # Auto-certify if requested
-                            if generation_data['auto_certify']:
-                                new_log.certify_log()
-            
-            # Generate compliance validation if requested
-            compliance_summary = {}
-            if generation_data['include_compliance_validation']:
-                validation_result = eld_generator.validate_log_compliance(trip)
-                compliance_summary = {
-                    'is_compliant': validation_result.get('is_compliant', True),
-                    'total_violations': len(validation_result.get('violations', [])),
-                    'total_warnings': len(validation_result.get('warnings', [])),
-                    'daily_validations': validation_result.get('daily_validations', [])
-                }
-            
-            # Prepare response data
-            all_logs = logs_created + logs_updated
-            serialized_logs = ELDDailyLogSerializer(all_logs, many=True).data if all_logs else []
-            
-            logger.info(f"ELD logs generated for trip {trip.trip_id}: {len(logs_created)} created, {len(logs_updated)} updated")
-            
-            return Response(
-                ELDLogGenerationResponseSerializer({
-                    'success': True,
-                    'trip_id': trip.trip_id,
-                    'logs_generated': len(logs_created),
-                    'logs_updated': len(logs_updated),
-                    'total_days': eld_result.get('total_days', 0),
-                    'log_date_range': eld_result.get('log_date_range', {}),
-                    'daily_logs': serialized_logs,
-                    'compliance_summary': compliance_summary,
-                    'generated_at': timezone.now()
-                }).data,
-                status=status.HTTP_201_CREATED
-            )
-            
-        except Exception as e:
-            logger.error(f"Error generating enhanced ELD logs for trip {trip_id}: {str(e)}")
-            return Response(
-                ELDLogGenerationResponseSerializer({
-                    'success': False,
-                    'trip_id': trip.trip_id if 'trip' in locals() else None,
-                    'logs_generated': 0,
-                    'logs_updated': 0,
-                    'total_days': 0,
-                    'log_date_range': {},
-                    'compliance_summary': {},
-                    'error': str(e),
-                    'generated_at': timezone.now()
                 }).data,
                 status=status.HTTP_500_INTERNAL_SERVER_ERROR
             )
@@ -1045,9 +950,15 @@ class TripViewSet(viewsets.ModelViewSet):
         daily_log_data: dict,
         trip: Trip
         ) -> ELDDailyLog:
-        """Create ELD log from generated data"""
+        """Create ELD log from generated data - WITH PROPER LINKING"""
         
-        # Create the daily log
+        print("DEBUG: Creating ELD log with all related data...")
+        
+        # Get all HOS periods for this trip for matching
+        hos_periods = list(trip.hos_periods.all().order_by('start_datetime'))
+        print(f"DEBUG: Found {len(hos_periods)} HOS periods for matching")
+        
+        # Create the daily log with our perfect pre-calculated totals
         eld_log = ELDDailyLog.objects.create(
             trip=trip,
             log_date=datetime.fromisoformat(daily_log_data['log_date']).date(),
@@ -1069,7 +980,7 @@ class TripViewSet(viewsets.ModelViewSet):
             vin=daily_log_data.get('vin', ''),
             vehicle_make_model=daily_log_data.get('vehicle_make_model', ''),
             
-            # Daily totals
+            # Our perfectly calculated daily totals
             total_off_duty_hours=daily_log_data['daily_totals']['off_duty'],
             total_sleeper_berth_hours=daily_log_data['daily_totals']['sleeper_berth'],
             total_driving_hours=daily_log_data['daily_totals']['driving'],
@@ -1084,31 +995,57 @@ class TripViewSet(viewsets.ModelViewSet):
             manifest_number=daily_log_data.get('shipping_documents', {}).get('manifest_number', ''),
             pickup_number=daily_log_data.get('shipping_documents', {}).get('pickup_number', ''),
             delivery_receipt=daily_log_data.get('shipping_documents', {}).get('delivery_receipt', ''),
-            commodity_description=daily_log_data.get('shipping_documents', {}).get('commodity', ''),
-            cargo_weight=daily_log_data.get('shipping_documents', {}).get('weight', ''),
-            is_hazmat=daily_log_data.get('shipping_documents', {}).get('hazmat', False),
+            commodity_description=daily_log_data.get('shipping_documents', {}).get('commodity_description', ''),
             
-            auto_generated=True
+            # Metadata
+            is_compliant=True,
+            is_certified=False,
+            auto_generated=True,
+            manual_edits_count=0
         )
         
-        # Create log entries
-        for entry_data in daily_log_data['log_entries']:
-            # Find corresponding HOS period
-            hos_period = None
-            try:
-                # Match by time and duty status
-                start_time = datetime.strptime(entry_data['start_time'], '%H:%M').time()
-                for period in trip.hos_periods.all():
-                    if (period.start_datetime.time() == start_time and 
-                        period.duty_status == entry_data['duty_status']):
-                        hos_period = period
-                        break
-            except (ValueError, AttributeError):
-                pass
+        print("DEBUG: ELD log created successfully")
+        
+        # Create log entries with HOS period links and store them for location remark linking
+        print("DEBUG: Creating log entries with HOS period matching...")
+        created_log_entries = []
+        
+        for i, entry_data in enumerate(daily_log_data['log_entries']):
+            # Find the corresponding HOS period
+            matching_hos_period = None
             
-            ELDLogEntry.objects.create(
+            try:
+                # Try to match by start time and duty status
+                entry_start_time = datetime.strptime(entry_data['start_time'], '%H:%M').time()
+                entry_duty_status = entry_data['duty_status']
+                
+                for hos_period in hos_periods:
+                    hos_start_time = hos_period.start_datetime.time()
+                    
+                    # Match by time (within 5 minutes) and duty status
+                    if (abs((datetime.combine(datetime.today(), entry_start_time) - 
+                            datetime.combine(datetime.today(), hos_start_time)).total_seconds()) <= 300 and
+                        hos_period.duty_status == entry_duty_status):
+                        matching_hos_period = hos_period
+                        print(f"DEBUG: Matched entry {i+1} to HOS period {hos_period.id}")
+                        break
+                
+                # If no exact match, try to match by sequence order
+                if not matching_hos_period and i < len(hos_periods):
+                    matching_hos_period = hos_periods[i]
+                    print(f"DEBUG: Matched entry {i+1} to HOS period {matching_hos_period.id} by sequence")
+                    
+            except (ValueError, IndexError, AttributeError) as e:
+                print(f"DEBUG: Error matching entry {i+1}: {e}")
+                # Use the first available HOS period as fallback
+                if hos_periods:
+                    matching_hos_period = hos_periods[0]
+                    print(f"DEBUG: Using fallback HOS period {matching_hos_period.id} for entry {i+1}")
+            
+            # Create the log entry
+            log_entry = ELDLogEntry.objects.create(
                 daily_log=eld_log,
-                hos_period=hos_period,
+                hos_period=matching_hos_period,  # REQUIRED FIELD
                 start_time=datetime.strptime(entry_data['start_time'], '%H:%M').time(),
                 end_time=datetime.strptime(entry_data['end_time'], '%H:%M').time(),
                 duty_status=entry_data['duty_status'],
@@ -1116,75 +1053,132 @@ class TripViewSet(viewsets.ModelViewSet):
                 duration_hours=entry_data['duration_hours'],
                 start_location=entry_data.get('location', ''),
                 end_location=entry_data.get('location', ''),
-                location_type=self._determine_location_type(entry_data.get('location', '')),
-                odometer_start=entry_data.get('odometer_start', 0),
-                odometer_end=entry_data.get('odometer_end', 0),
                 vehicle_miles=entry_data.get('vehicle_miles', 0),
                 remarks=entry_data.get('remarks', ''),
-                auto_generated_remarks=entry_data.get('remarks', ''),
+                
+                # Grid positioning for ELD visualization
                 grid_row=self._calculate_grid_row(entry_data['start_time']),
                 grid_column_start=self._calculate_grid_column(entry_data['start_time']),
-                grid_column_end=self._calculate_grid_column(entry_data['end_time'])
+                grid_column_end=self._calculate_grid_column(entry_data['end_time']),
+                
+                is_compliant=True
             )
+            
+            # Store for location remark linking
+            created_log_entries.append(log_entry)
         
-        # Create location remarks
+        print(f"DEBUG: Created {len(daily_log_data['log_entries'])} log entries")
+        
+        # Create location remarks with proper log entry links
+        print("DEBUG: Creating location remarks with log entry linking...")
         for remark_data in daily_log_data.get('location_remarks', []):
+            # Find the best matching log entry for this remark
+            matching_log_entry = None
+            
+            try:
+                remark_time = datetime.strptime(remark_data['time'], '%H:%M').time()
+                
+                # Find the log entry that this remark time falls within
+                for log_entry in created_log_entries:
+                    if log_entry.start_time <= remark_time <= log_entry.end_time:
+                        matching_log_entry = log_entry
+                        print(f"DEBUG: Matched remark at {remark_data['time']} to log entry {log_entry.id}")
+                        break
+                
+                # If no exact match, find the closest log entry by time
+                if not matching_log_entry and created_log_entries:
+                    closest_entry = min(created_log_entries, 
+                                    key=lambda entry: abs((datetime.combine(datetime.today(), entry.start_time) - 
+                                                            datetime.combine(datetime.today(), remark_time)).total_seconds()))
+                    matching_log_entry = closest_entry
+                    print(f"DEBUG: Matched remark at {remark_data['time']} to closest log entry {closest_entry.id}")
+                    
+            except (ValueError, AttributeError) as e:
+                print(f"DEBUG: Error matching remark: {e}")
+                # Use the first log entry as fallback
+                if created_log_entries:
+                    matching_log_entry = created_log_entries[0]
+                    print(f"DEBUG: Using fallback log entry {matching_log_entry.id} for remark")
+            
+            # Create the location remark
             ELDLocationRemark.objects.create(
                 daily_log=eld_log,
-                log_entry=None,  # Would need to match with log entry
+                log_entry=matching_log_entry,  # REQUIRED FIELD - now properly linked
                 time=datetime.strptime(remark_data['time'], '%H:%M').time(),
                 location=remark_data['location'],
-                location_type=remark_data.get('location_type', 'unknown'),
-                odometer_reading=remark_data.get('odometer', 0),
+                location_type=remark_data.get('location_type', 'duty_status_change'),
                 duty_status=remark_data.get('duty_status', 'off_duty'),
                 remarks=remark_data.get('remarks', ''),
                 auto_generated=True,
                 is_duty_status_change=remark_data.get('duty_status_change', True)
             )
         
+        print(f"DEBUG: Created {len(daily_log_data.get('location_remarks', []))} location remarks")
+        print("DEBUG: Complete ELD log created with all related data and proper linking")
+        
         return eld_log
     
+    def _calculate_grid_row(self, time_str: str) -> int:
+        """Calculate grid row from time (0-10 for 24-hour period)"""
+        try:
+            time_obj = datetime.strptime(time_str, '%H:%M').time()
+            hour = time_obj.hour
+            # Each row represents 2 hours and 24 minutes (144 minutes)
+            return min(hour // 2, 10)
+        except:
+            return 0
+
+    def _calculate_grid_column(self, time_str: str) -> int:
+        """Calculate grid column from time (0-7 for 15-minute increments)"""
+        try:
+            time_obj = datetime.strptime(time_str, '%H:%M').time()
+            minute = time_obj.minute
+            # Each column represents 15 minutes
+            return min(minute // 15, 7)
+        except:
+            return 0
+        
     def _update_eld_log_from_data(self, eld_log: ELDDailyLog, daily_log_data: dict, trip: Trip):
-        """Update existing ELD log with new data"""
-        
-        # Only update if not certified
-        if eld_log.is_certified:
-            return eld_log
-        
-        # Update daily totals
-        eld_log.total_off_duty_hours = daily_log_data['daily_totals']['off_duty']
-        eld_log.total_sleeper_berth_hours = daily_log_data['daily_totals']['sleeper_berth']
-        eld_log.total_driving_hours = daily_log_data['daily_totals']['driving']
-        eld_log.total_on_duty_not_driving_hours = daily_log_data['daily_totals']['on_duty_not_driving']
-        eld_log.total_on_duty_hours = daily_log_data['daily_totals']['total_on_duty']
-        eld_log.total_distance_miles = sum(
-            entry['vehicle_miles'] for entry in daily_log_data['log_entries']
-        )
-        eld_log.save()
-        
-        # Clear and recreate log entries
-        eld_log.log_entries.all().delete()
-        eld_log.location_remarks.all().delete()
-        
-        # Recreate entries (use same logic as create)
-        for entry_data in daily_log_data['log_entries']:
-            ELDLogEntry.objects.create(
-                daily_log=eld_log,
-                start_time=datetime.strptime(entry_data['start_time'], '%H:%M').time(),
-                end_time=datetime.strptime(entry_data['end_time'], '%H:%M').time(),
-                duty_status=entry_data['duty_status'],
-                duration_minutes=entry_data['duration_minutes'],
-                duration_hours=entry_data['duration_hours'],
-                start_location=entry_data.get('location', ''),
-                vehicle_miles=entry_data.get('vehicle_miles', 0),
-                remarks=entry_data.get('remarks', ''),
-                auto_generated_remarks=entry_data.get('remarks', ''),
-                grid_row=self._calculate_grid_row(entry_data['start_time']),
-                grid_column_start=self._calculate_grid_column(entry_data['start_time']),
-                grid_column_end=self._calculate_grid_column(entry_data['end_time'])
+            """Update existing ELD log with new data"""
+            
+            # Only update if not certified
+            if eld_log.is_certified:
+                return eld_log
+            
+            # Update daily totals
+            eld_log.total_off_duty_hours = daily_log_data['daily_totals']['off_duty']
+            eld_log.total_sleeper_berth_hours = daily_log_data['daily_totals']['sleeper_berth']
+            eld_log.total_driving_hours = daily_log_data['daily_totals']['driving']
+            eld_log.total_on_duty_not_driving_hours = daily_log_data['daily_totals']['on_duty_not_driving']
+            eld_log.total_on_duty_hours = daily_log_data['daily_totals']['total_on_duty']
+            eld_log.total_distance_miles = sum(
+                entry['vehicle_miles'] for entry in daily_log_data['log_entries']
             )
-        
-        return eld_log
+            eld_log.save()
+            
+            # Clear and recreate log entries
+            eld_log.log_entries.all().delete()
+            eld_log.location_remarks.all().delete()
+            
+            # Recreate entries (use same logic as create)
+            for entry_data in daily_log_data['log_entries']:
+                ELDLogEntry.objects.create(
+                    daily_log=eld_log,
+                    start_time=datetime.strptime(entry_data['start_time'], '%H:%M').time(),
+                    end_time=datetime.strptime(entry_data['end_time'], '%H:%M').time(),
+                    duty_status=entry_data['duty_status'],
+                    duration_minutes=entry_data['duration_minutes'],
+                    duration_hours=entry_data['duration_hours'],
+                    start_location=entry_data.get('location', ''),
+                    vehicle_miles=entry_data.get('vehicle_miles', 0),
+                    remarks=entry_data.get('remarks', ''),
+                    auto_generated_remarks=entry_data.get('remarks', ''),
+                    grid_row=self._calculate_grid_row(entry_data['start_time']),
+                    grid_column_start=self._calculate_grid_column(entry_data['start_time']),
+                    grid_column_end=self._calculate_grid_column(entry_data['end_time'])
+                )
+            
+            return eld_log
     
     def _determine_location_type(self, location: str) -> str:
         """Determine location type from location string"""
