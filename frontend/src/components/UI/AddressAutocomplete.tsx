@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useRef, useCallback } from "react";
-import { MapPin, CheckCircle, AlertCircle, Loader2, X } from "lucide-react";
+import { MapPin, CheckCircle, AlertCircle, Loader2, CircleX } from "lucide-react";
 import { useGeocodeMutation } from "../../hooks/useTripQueries";
 
 
@@ -290,10 +290,10 @@ export function AddressAutocomplete({
             disabled={disabled}
             autoFocus={autoFocus}
             className={`
-                w-full px-3 py-2 pl-10 pr-10 border rounded-md
-                focus:ring-2 focus:ring-blue-500 focus:border-blue-500
+                w-full px-3 py-3 pl-10 pr-10 border rounded-md
+                bg-[#FAFAFA] focus:ring-2 focus:ring-blue-700 text-gray-900 focus:outline-none
                 disabled:bg-gray-50 disabled:text-gray-500
-                ${error || geocodeError ? "border-red-500" : "border-gray-300"}
+                ${error || geocodeError ? "ring-2 ring-red-500" : "border-gray-300"}
                 ${isGeocoded ? "bg-green-50 border-green-300" : ""}
               `}
           />
@@ -310,7 +310,7 @@ export function AddressAutocomplete({
               onClick={handleClear}
               className="absolute inset-y-0 right-0 pr-3 flex items-center hover:text-gray-700"
             >
-              <X className="w-4 h-4 text-gray-400" />
+              <CircleX className="w-4 h-4 md:h-5 md:w-5 text-gray-500 hover:text-gray-800 relative right-[1.3rem] md:right-[2.8rem]" />
             </button>
           )}
         </div>
@@ -358,21 +358,6 @@ export function AddressAutocomplete({
         {/* Error Message */}
         {(error || geocodeError) && (
           <p className="mt-1 text-sm text-red-600">{error || geocodeError}</p>
-        )}
-
-        {/* Success Message */}
-        {isGeocoded && !error && !geocodeError && (
-          <p className="mt-1 text-sm text-green-600 flex items-center space-x-1">
-            <CheckCircle className="w-3 h-3" />
-            <span>Address verified</span>
-          </p>
-        )}
-
-        {/* Help Text */}
-        {!isGeocoded && !error && !geocodeError && (
-          <p className="mt-1 text-xs text-gray-500">
-            Start typing to search for addresses. Press Enter to confirm.
-          </p>
         )}
       </div>
     );

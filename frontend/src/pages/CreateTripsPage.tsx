@@ -14,7 +14,6 @@ import {
   Clock,
   AlertCircle,
   Calculator,
-  ArrowLeft,
   Navigation,
   Route as RouteIcon,
 } from "lucide-react";
@@ -23,6 +22,7 @@ import { useCreateTrip, useReverseGeocodeMutation } from "../hooks/useTripQuerie
 import { useAddressInput } from "../hooks/useAddressInput";
 import type { CreateTripRequest, TripSettings, CurrentDriverStatus } from "../types";
 import { DriverStatusCard } from "../components/UI/DriverStatusCard";
+import { motion } from "framer-motion";
 
 
 interface FormErrors {
@@ -423,21 +423,20 @@ export function CreateTripPage() {
 
   return (
     <Layout>
-      <div className="max-w-4xl mx-auto space-y-6">
-        {/* Header */}
-        <div className="flex items-center space-x-4">
-          <Link to="/trips">
-            <Button variant="ghost" size="sm">
-              <ArrowLeft className="w-4 h-4 mr-2" />
-              Back to Trips
-            </Button>
-          </Link>
-          <div>
-            <h1 className="text-2xl font-bold text-gray-900">Plan New Trip</h1>
-            <p className="text-gray-600">
-              Create a new HOS-compliant trip with smart address autocomplete
-            </p>
-          </div>
+      <motion.div
+        className="max-w-4xl mx-auto mt-14 md:mt-0 pb-[12%] md:pb-0 pt-4 space-y-6"
+        initial={{ opacity: 0 }}
+        animate={{ opacity: 1 }}
+        transition={{
+          type: "spring",
+          stiffness: 300,
+          damping: 25,
+          duration: 1,
+        }}
+      >
+        <div>
+          <h1 className="text-2xl font-bold text-gray-900">Plan New Trip</h1>
+          <p className="text-gray-600">Create a new HOS-compliant trip</p>
         </div>
 
         {/* Current Driver HOS Status */}
@@ -466,8 +465,7 @@ export function CreateTripPage() {
 
         {/* Trip Form */}
         <form onSubmit={handleSubmit} className="space-y-6">
-          {/* Trip Details */}
-          <Card>
+          <Card className="px-3 md:px-4">
             <CardHeader>
               <CardTitle className="flex items-center space-x-2">
                 <RouteIcon className="w-5 h-5" />
@@ -477,34 +475,31 @@ export function CreateTripPage() {
             <CardContent className="space-y-6">
               <div className="space-y-6">
                 {/* Current Location with GPS button */}
-                <div className="grid grid-cols-1 md:grid-cols-4 gap-4 items-end">
-                  <div className="md:col-span-3">
-                    <AddressAutocomplete
-                      label="Current Location"
-                      value={currentLocation.addressData.address}
-                      onChange={currentLocation.handleAddressChange}
-                      onCoordinatesChange={
-                        currentLocation.handleCoordinatesChange
-                      }
-                      placeholder="Enter your current location..."
-                      error={errors.current_address}
-                      disabled={isFormDisabled}
-                      required
-                      autoFocus
-                    />
-                  </div>
-                  <div>
-                    <Button
-                      type="button"
-                      variant="secondary"
-                      onClick={handleGetCurrentLocation}
-                      disabled={isFormDisabled}
-                      className="w-full"
-                      title="Current Address"
-                    >
-                      <Navigation className="w-4 h-4" />
-                    </Button>
-                  </div>
+
+                <div className="md:col-span-3 relative">
+                  <AddressAutocomplete
+                    label="Current Location"
+                    value={currentLocation.addressData.address}
+                    onChange={currentLocation.handleAddressChange}
+                    onCoordinatesChange={
+                      currentLocation.handleCoordinatesChange
+                    }
+                    placeholder="Enter your current location..."
+                    error={errors.current_address}
+                    disabled={isFormDisabled}
+                    required
+                    autoFocus
+                  />
+                  <Button
+                    type="button"
+                    variant="secondary"
+                    onClick={handleGetCurrentLocation}
+                    disabled={isFormDisabled}
+                    className="absolute bg-transparent hover:bg-transparent top-[46%] -right-2 md:right-0 z-20"
+                    title="Current Address"
+                  >
+                    <Navigation className="w-[1rem] h-[1rem] md:h-5 md:w-5 text-gray-500 hover:text-gray-800" />
+                  </Button>
                 </div>
 
                 {/* Pickup Location */}
@@ -551,6 +546,7 @@ export function CreateTripPage() {
                     disabled={isFormDisabled}
                     error={errors.departure_datetime}
                     required
+                    className="text-gray-900"
                   />
                 </div>
 
@@ -571,6 +567,7 @@ export function CreateTripPage() {
                     disabled={isFormDisabled}
                     min="200"
                     max="1200"
+                    className="text-gray-900"
                   />
                 </div>
               </div>
@@ -593,6 +590,7 @@ export function CreateTripPage() {
                     disabled={isFormDisabled}
                     min="15"
                     max="480"
+                    className="text-gray-900"
                   />
                 </div>
                 <div className="space-y-2">
@@ -612,6 +610,7 @@ export function CreateTripPage() {
                     disabled={isFormDisabled}
                     min="15"
                     max="480"
+                    className="text-gray-900"
                   />
                 </div>
               </div>
@@ -623,7 +622,7 @@ export function CreateTripPage() {
             <Link to="/trips">
               <Button
                 type="button"
-                variant="secondary"
+                variant="danger"
                 disabled={isFormDisabled}
               >
                 Cancel
@@ -643,33 +642,11 @@ export function CreateTripPage() {
                 ? "Break Required"
                 : !isStatusLoaded
                 ? "Loading Status..."
-                : "Create Trip"
-              }
+                : "Create Trip"}
             </Button>
           </div>
-
-          {/* Global Form Errors */}
-          {Object.keys(errors).length > 0 && (
-            <Card className="border-red-200 bg-red-50">
-              <CardContent className="p-4">
-                <div className="flex items-start space-x-3">
-                  <AlertCircle className="w-5 h-5 text-red-600 mt-0.5" />
-                  <div className="flex-1">
-                    <h4 className="font-medium text-red-800">
-                      Please fix the following errors:
-                    </h4>
-                    <ul className="mt-2 text-sm text-red-700 space-y-1">
-                      {Object.entries(errors).map(([field, error]) => (
-                        <li key={field}>• {error}</li>
-                      ))}
-                    </ul>
-                  </div>
-                </div>
-              </CardContent>
-            </Card>
-          )}
         </form>
-      </div>
+      </motion.div>
     </Layout>
   );
 }

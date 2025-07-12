@@ -23,7 +23,7 @@ export function LoadingSpinner({
     >
       <div
         className={clsx(
-          "animate-spin rounded-full border-b-2 border-blue-600",
+          "animate-spin rounded-full border-t-[3px] border-blue-600",
           sizeClasses[size]
         )}
       />

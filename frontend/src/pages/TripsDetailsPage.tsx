@@ -1,7 +1,7 @@
 /* eslint-disable @typescript-eslint/no-explicit-any */
 
 import { useState } from "react";
-import { useParams, Link, useNavigate } from "react-router-dom";
+import { useParams, useNavigate } from "react-router-dom";
 import { Layout } from "../components/Layout/Layout";
 import {
   Card,
@@ -12,7 +12,6 @@ import {
 import { Button } from "../components/UI/Button";
 import { LoadingSpinner } from "../components/UI/LoadingSpinner";
 import {
-  ArrowLeft,
   MapPin,
   Clock,
   Route,
@@ -21,7 +20,6 @@ import {
   Truck,
   FileText,
   Download,
-  Edit,
   Map,
   Calculator,
   Navigation,
@@ -51,6 +49,8 @@ import { useMap } from "../hooks/useMap";
 import { TripActions } from "../components/UI/TripActions";
 import type { RoutePlanStop, TripELDLogsResponse } from "../types";
 import type { LatLngExpression } from "leaflet";
+import { motion } from "framer-motion";
+
 
 type TabType = "overview" | "map" | "stops" | "hos" | "compliance" | "eld_logs";
 
@@ -75,7 +75,7 @@ export function TripDetailPage() {
 
   const {
     calculateRoute,
-    optimizeRoute,
+    // optimizeRoute,
     isCalculating,
     isOptimizing,
     calculationError,
@@ -150,18 +150,18 @@ export function TripDetailPage() {
     }
   };
 
-  const handleOptimizeRoute = async () => {
-    clearErrors();
-    try {
-      await optimizeRoute({
-        optimize_breaks: true,
-        optimize_fuel_stops: true,
-        optimize_daily_resets: true,
-      });
-    } catch (error) {
-      console.error("Error optimizing route:", error);
-    }
-  };
+  // const handleOptimizeRoute = async () => {
+  //   clearErrors();
+  //   try {
+  //     await optimizeRoute({
+  //       optimize_breaks: true,
+  //       optimize_fuel_stops: true,
+  //       optimize_daily_resets: true,
+  //     });
+  //   } catch (error) {
+  //     console.error("Error optimizing route:", error);
+  //   }
+  // };
 
   const handleGenerateELDLogs = async () => {
     if (!tripId) return;
@@ -299,27 +299,8 @@ export function TripDetailPage() {
   if (isTripLoading) {
     return (
       <Layout>
-        <div className="space-y-6">
-          <div className="flex items-center space-x-4">
-            <Link to="/trips">
-              <Button
-                variant="ghost"
-                size="sm"
-                leftIcon={<ArrowLeft className="w-4 h-4" />}
-              >
-                Back to Trips
-              </Button>
-            </Link>
-            <div>
-              <h1 className="text-2xl font-bold text-gray-900">
-                Loading Trip...
-              </h1>
-            </div>
-          </div>
-
-          <div className="flex items-center justify-center py-12">
-            <LoadingSpinner size="large" text="Loading trip details..." />
-          </div>
+        <div className="flex items-center justify-center h-[100vh] md:h-[80vh] lg:landscape:h-[80vh]">
+          <LoadingSpinner size="large" />
         </div>
       </Layout>
     );
@@ -329,26 +310,9 @@ export function TripDetailPage() {
   if (isTripError || !trip) {
     return (
       <Layout>
-        <div className="space-y-6">
-          <div className="flex items-center space-x-4">
-            <Link to="/trips">
-              <Button
-                variant="ghost"
-                size="sm"
-                leftIcon={<ArrowLeft className="w-4 h-4" />}
-              >
-                Back to Trips
-              </Button>
-            </Link>
-            <div>
-              <h1 className="text-2xl font-bold text-gray-900">
-                Trip Not Found
-              </h1>
-            </div>
-          </div>
-
+        <div className="space-y-6 mt-14 md:mt-5 md:pr-4">
           <Card className="border-red-200 bg-red-50">
-            <CardContent className="p-6">
+            <CardContent className="">
               <div className="flex items-center space-x-3">
                 <AlertCircle className="w-8 h-8 text-red-600" />
                 <div>
@@ -380,49 +344,27 @@ export function TripDetailPage() {
 
   return (
     <Layout>
-      <div className="space-y-6 mt-14">
+      <motion.div
+        className="space-y-6 mt-14 pt-4 md:mt-0"
+        initial={{ opacity: 0 }}
+        animate={{ opacity: 1 }}
+        transition={{
+          type: "spring",
+          stiffness: 300,
+          damping: 25,
+          duration: 1,
+        }}
+      >
         {/* Header */}
-        <div className="flex items-center justify-between">
-          <div className="flex items-center space-x-4">
-            <Link to="/trips">
-              <Button
-                variant="ghost"
-                size="sm"
-                leftIcon={<ArrowLeft className="w-4 h-4" />}
-              >
-                Back to Trips
-              </Button>
-            </Link>
-            <div>
-              <h1 className="text-2xl font-bold text-gray-900">
-                {trip.pickup_address} → {trip.delivery_address}
-              </h1>
-              <p className="text-gray-600">Trip ID: {trip.trip_id}</p>
-            </div>
-          </div>
-
-          <div className="flex items-center space-x-3">
-            {trip.status === "draft" && (
-              <Link to={`/trips/${tripId}/edit`}>
-                <Button leftIcon={<Edit className="w-4 h-4" />}>
-                  Edit Trip
-                </Button>
-              </Link>
-            )}
-            {/* <Button
-              variant="secondary"
-              leftIcon={<Download className="w-4 h-4" />}
-              onClick={handleGenerateELD}
-              isLoading={isELDLoading}
-              disabled={isELDLoading || !trip.hos_periods.length}
-            >
-              {eldData ? "Refresh ELD" : "Generate ELD"}
-            </Button> */}
-          </div>
+        <div className="space-y-4">
+          <h1 className="text-[1.3rem] font-bold text-gray-900">
+            {trip.pickup_address} → {trip.delivery_address}
+          </h1>
+          <p className="text-gray-600">Trip ID: {trip.trip_id}</p>
         </div>
 
         {/* Error Messages */}
-        {(calculationError || optimizationError || eldError) && (
+        {(calculationError || optimizationError) && (
           <Card className="border-red-200 bg-red-50">
             <CardContent className="p-4">
               <div className="flex items-start space-x-3">
@@ -461,89 +403,31 @@ export function TripDetailPage() {
           </Card>
         )}
 
-        <Card>
-          <CardContent>
-            <div className="space-y-4">
-              {/* Route Calculation Actions */}
-              {trip.status === "draft" && (
-                <div className="space-y-3">
-                  <CardHeader>
-                    <CardTitle className="flex items-center">
-                      <Settings className="w-5 h-5 mr-2" />
-                      Trip Actions
-                    </CardTitle>
-                  </CardHeader>
-                  <div className="flex items-center space-x-2 text-blue-600 mb-2">
-                    <Calculator className="w-5 h-5" />
-                    <span className="font-medium">Route Planning</span>
-                  </div>
-                  <div className="flex flex-wrap gap-3">
-                    <Button
-                      leftIcon={<Calculator className="w-4 h-4" />}
-                      onClick={handleCalculateRoute}
-                      isLoading={isCalculating}
-                      disabled={isCalculating || isOptimizing}
-                    >
-                      {isCalculating ? "Calculating..." : "Calculate Route"}
-                    </Button>
-
-                    {trip.hos_periods.length > 0 && (
-                      <Button
-                        variant="secondary"
-                        leftIcon={<RefreshCw className="w-4 h-4" />}
-                        onClick={handleOptimizeRoute}
-                        isLoading={isOptimizing}
-                        disabled={isCalculating || isOptimizing}
-                      >
-                        {isOptimizing ? "Optimizing..." : "Optimize Route"}
-                      </Button>
-                    )}
-                  </div>
+        {trip.status === "draft" && (
+          <Card className="py-4 px-3 shadow-none pb-4 md:pb-10">
+            <CardContent>
+              <div className="space-y-3">
+                <CardHeader>
+                  <CardTitle className="flex items-center">
+                    <Settings className="w-5 h-5 mr-2" />
+                    Trip Actions
+                  </CardTitle>
+                </CardHeader>
+                <div className="flex items-center space-x-2 text-green-600 mb-2">
+                  <Calculator className="w-5 h-5" />
+                  <span className="font-medium">Route Planning</span>
                 </div>
-              )}
+                <div className="grid grid-cols-2 xl:flex xl:items-center gap-3">
+                  <Button
+                    leftIcon={<Calculator className="w-4 h-4" />}
+                    onClick={handleCalculateRoute}
+                    isLoading={isCalculating}
+                    disabled={isCalculating || isOptimizing}
+                    className="bg-green-600 hover:bg-green-700"
+                  >
+                    {isCalculating ? "Generating..." : "Generate Route"}
+                  </Button>
 
-              {trip.status === "completed" && !eldLogsData?.logs?.length && (
-                <Button
-                  onClick={handleGenerateELDLogs}
-                  isLoading={generateELDMutation.isPending}
-                  leftIcon={<FileText className="w-4 h-4" />}
-                  className="bg-grren-600 hover:bg-green-700"
-                >
-                  Generate ELD Logs
-                </Button>
-              )}
-
-              {/* Trip Completion Actions */}
-              {(trip.status === "Planned" ||
-                (trip.status === "completed" && hasCompletionData())) && (
-                <div className="border-t pt-4">
-                  <div className="flex items-center space-x-2 text-green-600 mb-3">
-                    <CheckCircle className="w-5 h-5" />
-                    <span className="font-medium">
-                      {trip.status === "Planned"
-                        ? "Trip Completion"
-                        : "Trip Summary"}
-                    </span>
-                  </div>
-                  <TripActions
-                    trip={trip}
-                    onTripCompleted={(response) => {
-                      // Refetch trip data to get updated status
-                      refetchTrip();
-                      console.log("Trip completed:", response.message);
-                    }}
-                    showFullActions={false}
-                  />
-                </div>
-              )}
-
-              {/* Delete Action for Draft Trips */}
-              {trip.status === "draft" && (
-                <div className="border-t pt-4">
-                  <div className="flex items-center space-x-2 text-red-600 mb-3">
-                    <Trash2 className="w-5 h-5" />
-                    <span className="font-medium">Delete Trip</span>
-                  </div>
                   <Button
                     variant="danger"
                     leftIcon={<Trash2 className="w-4 h-4" />}
@@ -554,17 +438,59 @@ export function TripDetailPage() {
                     {deleteTrip.isPending ? "Deleting..." : "Delete Trip"}
                   </Button>
                 </div>
-              )}
-            </div>
-          </CardContent>
-        </Card>
+              </div>
+            </CardContent>
+          </Card>
+        )}
+
+        {trip.status === "completed" && !eldLogsData?.logs?.length && (
+          <Card className="py-4 px-3 shadow-none">
+            <CardContent>
+              <Button
+                onClick={handleGenerateELDLogs}
+                isLoading={generateELDMutation.isPending}
+                leftIcon={<FileText className="w-4 h-4" />}
+                className="bg-green-600 hover:bg-green-700"
+              >
+                Generate ELD Logs
+              </Button>
+            </CardContent>
+          </Card>
+        )}
+
+        {(trip.status === "Planned" ||
+          (trip.status === "completed" && hasCompletionData())) && (
+          <Card className="py-4 px-3 shadow-none">
+            <CardContent>
+              <div className="pt-4">
+                <div className="flex items-center space-x-2 text-green-600 mb-3">
+                  <CheckCircle className="w-5 h-5" />
+                  <span className="font-medium">
+                    {trip.status === "Planned"
+                      ? "Trip Completion"
+                      : "Trip Summary"}
+                  </span>
+                </div>
+                <TripActions
+                  trip={trip}
+                  onTripCompleted={(response) => {
+                    // Refetch trip data to get updated status
+                    refetchTrip();
+                    console.log("Trip completed:", response.message);
+                  }}
+                  showFullActions={false}
+                />
+              </div>
+            </CardContent>
+          </Card>
+        )}
 
         {/* Trip Status Card */}
-        <Card>
-          <CardContent className="p-6">
-            <div className="grid grid-cols-1 md:grid-cols-4 gap-6">
+        <Card className="shadow-none md:p-7">
+          <CardContent className="">
+            <div className="grid grid-cols-2 gap-6">
               <div className="flex items-center space-x-3">
-                <div className="w-12 h-12 bg-blue-100 rounded-lg flex items-center justify-center">
+                <div className="p-[0.65rem] md:p-[0.8rem] bg-blue-100 rounded-lg flex items-center justify-center">
                   <Route className="w-6 h-6 text-blue-600" />
                 </div>
                 <div>
@@ -576,31 +502,28 @@ export function TripDetailPage() {
               </div>
 
               <div className="flex items-center space-x-3">
-                <div className="w-12 h-12 bg-green-100 rounded-lg flex items-center justify-center">
+                <div className="p-[0.65rem] md:p-[0.8rem] bg-green-100 rounded-lg flex items-center justify-center">
                   <CheckCircle className="w-6 h-6 text-green-600" />
                 </div>
                 <div>
                   <p className="text-sm text-gray-600">HOS Compliance</p>
                   <p
-                    className={`font-medium ${
+                    className={`font-medium text-sm ${
                       trip.is_hos_compliant ? "text-green-600" : "text-red-600"
                     }`}
                   >
                     {trip.is_hos_compliant ? "Compliant" : "Non-Compliant"}
                   </p>
-                  <p className="text-xs text-gray-500">
-                    Score: {trip.compliance_summary.score}%
-                  </p>
                 </div>
               </div>
 
               <div className="flex items-center space-x-3">
-                <div className="w-12 h-12 bg-purple-100 rounded-lg flex items-center justify-center">
+                <div className="p-[0.65rem] md:p-[0.8rem] bg-purple-100 rounded-lg flex items-center justify-center">
                   <Clock className="w-6 h-6 text-purple-600" />
                 </div>
                 <div>
                   <p className="text-sm text-gray-600">Duration</p>
-                  <p className="font-medium">
+                  <p className="font-medium text-gray-800">
                     {trip.total_driving_time
                       ? `${trip.total_driving_time} hours`
                       : "Not calculated"}
@@ -614,12 +537,12 @@ export function TripDetailPage() {
               </div>
 
               <div className="flex items-center space-x-3">
-                <div className="w-12 h-12 bg-orange-100 rounded-lg flex items-center justify-center">
+                <div className="p-[0.65rem] md:p-[0.8rem] bg-orange-100 rounded-lg flex items-center justify-center">
                   <Truck className="w-6 h-6 text-orange-600" />
                 </div>
                 <div>
                   <p className="text-sm text-gray-600">Vehicle</p>
-                  <p className="font-medium">
+                  <p className="font-medium text-gray-800">
                     {trip.vehicle_info?.unit_number || "No vehicle assigned"}
                   </p>
                   <p className="text-xs text-gray-500">
@@ -634,8 +557,8 @@ export function TripDetailPage() {
         </Card>
 
         {/* Tabs */}
-        <div className="border-b border-gray-200">
-          <nav className="-mb-px flex space-x-8">
+        <div className="border-b border-gray-200 overflow-hidden">
+          <nav className="-mb-px flex space-x-8 overflow-x-auto custom-scrollbar pr-4">
             {tabs.map((tab) => (
               <button
                 key={tab.id}
@@ -661,7 +584,7 @@ export function TripDetailPage() {
         {/* Tab Content - keeping all existing tab content unchanged */}
         {activeTab === "overview" && (
           <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-            <Card>
+            <Card className="shadow-none">
               <CardHeader>
                 <CardTitle>Trip Details</CardTitle>
               </CardHeader>
@@ -713,7 +636,7 @@ export function TripDetailPage() {
               </CardContent>
             </Card>
 
-            <Card>
+            <Card className="shadow-none pb-10">
               <CardHeader>
                 <CardTitle>Route Summary</CardTitle>
               </CardHeader>
@@ -735,15 +658,15 @@ export function TripDetailPage() {
                       </div>
                       <div className="flex-1">
                         <p className="font-medium text-gray-500">
-                          {trip.current_address}
+                          {trip.current_address} → {trip.pickup_address}
                         </p>
                         <p className="text-sm text-gray-600">
-                          Current Location
+                          Current Location → Pickup Location
                         </p>
                       </div>
                       {trip.deadhead_distance_miles && (
                         <div className="text-right text-sm text-gray-500">
-                          <p>{trip.deadhead_distance_miles} mi</p>
+                          <p>{trip.deadhead_distance_miles} miles</p>
                           <p>{trip.deadhead_driving_time}h</p>
                         </div>
                       )}
@@ -778,13 +701,15 @@ export function TripDetailPage() {
                       </div>
                       <div className="flex-1">
                         <p className="font-medium text-gray-500">
-                          {trip.pickup_address}
+                          {trip.pickup_address} → {trip.delivery_address}
                         </p>
-                        <p className="text-sm text-gray-600">Pickup Location</p>
+                        <p className="text-sm text-gray-600">
+                          Pickup Location → Delivery Location
+                        </p>
                       </div>
                       {trip.loaded_distance_miles && (
                         <div className="text-right text-sm text-gray-500">
-                          <p>{trip.loaded_distance_miles} mi</p>
+                          <p>{trip.loaded_distance_miles} miles</p>
                           <p>{trip.loaded_driving_time}h</p>
                         </div>
                       )}
@@ -837,28 +762,25 @@ export function TripDetailPage() {
         {activeTab === "map" && (
           <div className="space-y-6">
             {/* Map Container */}
-            <Card>
+            <Card className="shadow-none px-2 md:px-4">
               <CardHeader>
-                <div className="flex items-center justify-between">
-                  <CardTitle>Route Map</CardTitle>
-                  <div className="flex items-center space-x-2">
-                    {trip.total_distance_miles && (
-                      <span className="text-sm text-gray-600">
-                        Total Distance: {trip.total_distance_miles} miles
-                      </span>
-                    )}
-                    {trip.is_hos_compliant ? (
-                      <span className="inline-flex items-center px-2 py-1 rounded-full text-xs font-medium bg-green-100 text-green-800">
-                        <CheckCircle className="w-3 h-3 mr-1" />
-                        HOS Compliant
-                      </span>
-                    ) : (
-                      <span className="inline-flex items-center px-2 py-1 rounded-full text-xs font-medium bg-red-100 text-red-800">
-                        <AlertTriangle className="w-3 h-3 mr-1" />
-                        Non-Compliant
-                      </span>
-                    )}
-                  </div>
+                <div className="flex items-center justify-between space-x-2">
+                  {trip.total_distance_miles && (
+                    <span className="text-sm text-gray-600">
+                      Total Distance: {trip.total_distance_miles} miles
+                    </span>
+                  )}
+                  {trip.is_hos_compliant ? (
+                    <span className="inline-flex items-center px-2 py-1 rounded-full text-xs font-medium bg-green-100 text-green-800">
+                      <CheckCircle className="w-3 h-3 mr-1" />
+                      HOS Compliant
+                    </span>
+                  ) : (
+                    <span className="inline-flex items-center px-2 py-1 rounded-full text-xs font-medium bg-red-100 text-red-800">
+                      <AlertTriangle className="w-3 h-3 mr-1" />
+                      Non-Compliant
+                    </span>
+                  )}
                 </div>
               </CardHeader>
               <CardContent className="p-0">
@@ -876,9 +798,9 @@ export function TripDetailPage() {
             </Card>
 
             {/* Map Information Cards */}
-            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
               {/* Route Summary */}
-              <Card>
+              <Card className="shadow-none">
                 <CardHeader>
                   <CardTitle className="text-lg">Route Summary</CardTitle>
                 </CardHeader>
@@ -923,60 +845,8 @@ export function TripDetailPage() {
                 </CardContent>
               </Card>
 
-              {/* Break Summary */}
-              <Card>
-                <CardHeader>
-                  <CardTitle className="text-lg">HOS Breaks</CardTitle>
-                </CardHeader>
-                <CardContent>
-                  <div className="space-y-3 text-sm">
-                    <div className="flex justify-between">
-                      <span className="text-gray-600">Required Breaks:</span>
-                      <span className="font-medium text-gray-700">
-                        {
-                          routeStops.filter((s) => s.type === "required_break")
-                            .length
-                        }
-                      </span>
-                    </div>
-                    <div className="flex justify-between">
-                      <span className="text-gray-600">Rest Periods:</span>
-                      <span className="font-medium text-gray-700">
-                        {
-                          routeStops.filter((s) => s.type === "rest_break")
-                            .length
-                        }
-                      </span>
-                    </div>
-                    <div className="flex justify-between">
-                      <span className="text-gray-600">Sleeper Berth:</span>
-                      <span className="font-medium text-gray-700">
-                        {
-                          routeStops.filter((s) => s.type === "sleeper_berth")
-                            .length
-                        }
-                      </span>
-                    </div>
-                    <div className="pt-2 border-t border-gray-200">
-                      <div className="flex justify-between">
-                        <span className="text-gray-600">Compliance:</span>
-                        <span
-                          className={`font-medium ${
-                            trip.is_hos_compliant
-                              ? "text-green-600"
-                              : "text-red-600"
-                          }`}
-                        >
-                          {trip.is_hos_compliant ? "Compliant" : "Violations"}
-                        </span>
-                      </div>
-                    </div>
-                  </div>
-                </CardContent>
-              </Card>
-
               {/* Navigation Actions */}
-              <Card>
+              <Card className="shadow-none">
                 <CardHeader>
                   <CardTitle className="text-lg">Navigation</CardTitle>
                 </CardHeader>
@@ -1007,19 +877,6 @@ export function TripDetailPage() {
                       size="sm"
                       className="w-full"
                       leftIcon={<Download className="w-4 h-4" />}
-                      onClick={() => {
-                        // Export route coordinates or open in mapping app
-                        const coords = routeCoordinates
-                          .map((coord) =>
-                            Array.isArray(coord)
-                              ? `${coord[0]},${coord[1]}`
-                              : `${coord.lat},${coord.lng}`
-                          )
-                          .join("|");
-
-                        const url = `https://maps.google.com/maps?waypoints=${coords}`;
-                        window.open(url, "_blank");
-                      }}
                     >
                       Export Route
                     </Button>
@@ -1029,7 +886,7 @@ export function TripDetailPage() {
                       size="sm"
                       className="w-full"
                       leftIcon={<Settings className="w-4 h-4" />}
-                      onClick={() => setActiveTab("stops")}
+                      // onClick={() => setActiveTab("stops")}
                     >
                       Modify Stops
                     </Button>
@@ -1040,12 +897,12 @@ export function TripDetailPage() {
 
             {/* Quick Stop Actions */}
             {routeStops.length > 0 && (
-              <Card>
+              <Card className="shadow-none pb-10">
                 <CardHeader>
                   <CardTitle className="text-lg">Quick Stop Actions</CardTitle>
                 </CardHeader>
                 <CardContent>
-                  <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-2">
+                  <div className="grid grid-cols-2  gap-2">
                     {routeStops.slice(0, 8).map((stop, index) => {
                       const isBreakStop = [
                         "required_break",
@@ -1112,11 +969,11 @@ export function TripDetailPage() {
         )}
 
         {activeTab === "stops" && (
-          <Card>
+          <Card className="shadow-none px-3 pb-10 md:px-6">
             <CardHeader>
               <CardTitle>Trip Stops ({trip.stops.length})</CardTitle>
             </CardHeader>
-            <CardContent>
+            <CardContent className="shadow-none">
               {trip.stops.length === 0 ? (
                 <div className="text-center py-8">
                   <MapPin className="w-12 h-12 text-gray-400 mx-auto mb-4" />
@@ -1130,16 +987,18 @@ export function TripDetailPage() {
                   {trip.stops.map((stop) => (
                     <div
                       key={stop.id}
-                      className="flex items-center justify-between p-4 border border-gray-200 rounded-lg"
+                      className="flex items-center justify-between px-3 py-4 border border-gray-200 rounded-lg"
                     >
                       <div className="flex items-center space-x-4">
-                        <div className="w-10 h-10 bg-blue-100 rounded-lg flex items-center justify-center">
+                        <div className="flex items-center justify-center">
                           <span className="text-sm font-bold text-blue-600">
                             {stop.sequence_order}
                           </span>
                         </div>
                         <div>
-                          <p className="font-medium">{stop.address}</p>
+                          <p className="font-medium text-gray-600">
+                            {stop.address}
+                          </p>
                           <p className="text-sm text-gray-600">
                             {stop.stop_type_display}
                           </p>
@@ -1172,7 +1031,7 @@ export function TripDetailPage() {
         )}
 
         {activeTab === "hos" && (
-          <Card>
+          <Card className="shadow-none px-3 pb-10 md:px-6">
             <CardHeader>
               <CardTitle>
                 HOS Duty Periods ({trip.hos_periods.length})
@@ -1196,30 +1055,30 @@ export function TripDetailPage() {
                     >
                       <div className="flex items-center space-x-4">
                         <div
-                          className={`w-10 h-10 rounded-lg flex items-center justify-center ${
+                          className={`p-[0.7rem] rounded-lg flex items-center justify-center ${
                             period.duty_status === "driving"
-                              ? "bg-red-100"
+                              ? "bg-green-100"
                               : period.duty_status === "on_duty_not_driving"
                               ? "bg-blue-100"
                               : period.duty_status === "off_duty"
-                              ? "bg-green-100"
+                              ? "bg-red-100"
                               : "bg-gray-100"
                           }`}
                         >
                           <Clock
                             className={`w-5 h-5 ${
                               period.duty_status === "driving"
-                                ? "text-red-600"
+                                ? "text-green-600"
                                 : period.duty_status === "on_duty_not_driving"
                                 ? "text-blue-600"
                                 : period.duty_status === "off_duty"
-                                ? "text-green-600"
+                                ? "text-red-600"
                                 : "text-gray-600"
                             }`}
                           />
                         </div>
                         <div>
-                          <p className="font-medium">
+                          <p className="font-medium text-gray-600">
                             {period.duty_status_display}
                           </p>
                           <p className="text-sm text-gray-600">
@@ -1267,7 +1126,7 @@ export function TripDetailPage() {
 
         {activeTab === "compliance" && (
           <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-            <Card>
+            <Card className="shadow-none px-3 md:px-6">
               <CardHeader>
                 <CardTitle className="flex items-center">
                   <CheckCircle className="w-5 h-5 mr-2" />
@@ -1381,22 +1240,32 @@ export function TripDetailPage() {
                     </div>
 
                     {complianceReport &&
-                      complianceReport.violations.length > 0 && (
+                      complianceReport?.violations.length > 0 && (
                         <div className="mt-4 p-3 bg-red-50 rounded-lg">
                           <h4 className="font-medium text-red-800 mb-2">
                             Violations Found
                           </h4>
                           <ul className="space-y-1">
-                            {complianceReport.violations.map(
-                              (violation, index) => (
-                                <li
+                            {complianceReport?.violations
+                              .slice(0, 2)
+                              .map((violation, index) => (
+                                <p
                                   key={index}
-                                  className="text-sm text-red-700"
+                                  className="text-sm font-medium text-red-600"
                                 >
-                                  • {violation.description}
-                                </li>
-                              )
-                            )}
+                                  ⚠{" "}
+                                  {violation.type
+                                    .replace(/_/g, " ")
+                                    .toUpperCase()}
+                                </p>
+                              ))}
+                            {complianceReport &&
+                              complianceReport.violations.length > 2 && (
+                                <p className="text-xs text-gray-500">
+                                  +{complianceReport.violations.length - 2} more
+                                  violations
+                                </p>
+                              )}
                           </ul>
                         </div>
                       )}
@@ -1424,7 +1293,7 @@ export function TripDetailPage() {
               </CardContent>
             </Card>
 
-            <Card>
+            <Card className="shadow-none">
               <CardHeader>
                 <CardTitle className="flex items-center">
                   <FileText className="w-5 h-5 mr-2" />
@@ -1436,7 +1305,6 @@ export function TripDetailPage() {
                   className="w-full justify-start"
                   variant="ghost"
                   onClick={() => {
-                    // This would open a compliance report modal or navigate to report page
                     console.log("Generate compliance report");
                   }}
                   disabled={!complianceReport}
@@ -1449,7 +1317,6 @@ export function TripDetailPage() {
                   className="w-full justify-start"
                   variant="ghost"
                   onClick={() => {
-                    // This would trigger a compliance validation
                     refetchTrip();
                   }}
                   disabled={!trip.hos_periods.length}
@@ -1457,37 +1324,6 @@ export function TripDetailPage() {
                   <CheckCircle className="w-4 h-4 mr-2" />
                   Validate HOS Compliance
                 </Button>
-
-                <div className="pt-3 border-t border-gray-200">
-                  <p className="text-sm text-gray-600 mb-2">
-                    Next Required Action:
-                  </p>
-                  {trip.is_hos_compliant ? (
-                    <p className="text-sm font-medium text-green-600">
-                      ✓ No immediate actions required
-                    </p>
-                  ) : (
-                    <div className="space-y-1">
-                      {complianceReport?.violations
-                        .slice(0, 2)
-                        .map((violation, index) => (
-                          <p
-                            key={index}
-                            className="text-sm font-medium text-red-600"
-                          >
-                            ⚠ {violation.type.replace(/_/g, " ").toUpperCase()}
-                          </p>
-                        ))}
-                      {complianceReport &&
-                        complianceReport.violations.length > 2 && (
-                          <p className="text-xs text-gray-500">
-                            +{complianceReport.violations.length - 2} more
-                            violations
-                          </p>
-                        )}
-                    </div>
-                  )}
-                </div>
               </CardContent>
             </Card>
           </div>
@@ -1513,7 +1349,7 @@ export function TripDetailPage() {
             isExporting={exportTripLogsMutation.isPending}
           />
         )}
-      </div>
+      </motion.div>
     </Layout>
   );
 }

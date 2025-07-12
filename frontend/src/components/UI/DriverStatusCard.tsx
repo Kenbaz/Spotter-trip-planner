@@ -34,6 +34,7 @@ export const DriverStatusCard: React.FC<DriverStatusCardProps> = ({
     isError,
     error,
     refetch,
+    isRefetching
   } = useCurrentDriverStatus();
 
   const updateStatusMutation = useUpdateDriverStatus();
@@ -72,7 +73,7 @@ export const DriverStatusCard: React.FC<DriverStatusCardProps> = ({
 
   if (isLoading) {
     return (
-      <Card className={`border-gray-200 ${className}`}>
+      <Card className={`border-gray-100 ${className}`}>
         <CardContent className="flex items-center justify-center p-6">
           <LoadingSpinner size="medium" />
           <span className="ml-2">Loading current HOS status...</span>
@@ -161,7 +162,7 @@ export const DriverStatusCard: React.FC<DriverStatusCardProps> = ({
   };
 
   return (
-    <Card className={`${cardClass} ${className}`}>
+    <Card className={`${cardClass} ${className} md:border md:border-gray-200 driver-status-card`}>
       <CardHeader>
         <CardTitle className="flex items-center justify-between">
           <div className="flex items-center space-x-2">
@@ -175,9 +176,15 @@ export const DriverStatusCard: React.FC<DriverStatusCardProps> = ({
                 variant="ghost"
                 size="sm"
                 onClick={handleRefresh}
-                className="text-gray-600 hover:text-gray-700"
+                className="text-gray-700 bg-transparent hover:text-gray-900"
               >
-                <RefreshCw className="w-4 h-4" />
+                <RefreshCw
+                  className={`${
+                    isRefetching
+                      ? "animate-spin w-4 h-4"
+                      : "w-4 h-4"
+                  }`}
+                />
               </Button>
             )}
           </div>
@@ -185,13 +192,13 @@ export const DriverStatusCard: React.FC<DriverStatusCardProps> = ({
       </CardHeader>
       <CardContent className="space-y-4">
         {/* HOS Hours Grid */}
-        <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+        <div className="grid grid-cols-2 md:grid-cols-4 md:gap-2 gap-4">
           <div className="space-y-1">
             <p className="text-sm font-medium text-gray-700">Cycle Hours</p>
-            <p className="text-lg font-semibold">
+            <p className="text-lg font-semibold text-gray-600">
               {status.total_cycle_hours.toFixed(1)} / 70
             </p>
-            <p className="text-xs text-gray-500">
+            <p className="text-sm text-gray-500">
               {status.remaining_cycle_hours.toFixed(1)} remaining
             </p>
             {status.remaining_cycle_hours <= 10 && (
@@ -203,7 +210,7 @@ export const DriverStatusCard: React.FC<DriverStatusCardProps> = ({
 
           <div className="space-y-1">
             <p className="text-sm font-medium text-gray-700">Driving Today</p>
-            <p className="text-lg font-semibold">
+            <p className="text-lg text-gray-600 font-semibold">
               {status.today_driving_hours.toFixed(1)} / 11
             </p>
             <p className="text-xs text-gray-500">
@@ -211,14 +218,14 @@ export const DriverStatusCard: React.FC<DriverStatusCardProps> = ({
             </p>
             {status.remaining_driving_hours_today <= 2 && (
               <p className="text-xs text-amber-600 font-medium">
-                Low remaining!
+                Hours low!
               </p>
             )}
           </div>
 
           <div className="space-y-1">
             <p className="text-sm font-medium text-gray-700">On-Duty Today</p>
-            <p className="text-lg font-semibold">
+            <p className="text-lg text-gray-600 font-semibold">
               {status.today_on_duty_hours.toFixed(1)} / 14
             </p>
             <p className="text-xs text-gray-500">
@@ -226,7 +233,7 @@ export const DriverStatusCard: React.FC<DriverStatusCardProps> = ({
             </p>
             {status.remaining_on_duty_hours_today <= 2 && (
               <p className="text-xs text-amber-600 font-medium">
-                Low remaining!
+                Hours low!
               </p>
             )}
           </div>
@@ -249,10 +256,10 @@ export const DriverStatusCard: React.FC<DriverStatusCardProps> = ({
         {/* Quick Status Change Actions */}
         {showActions && (
           <div className="border-t pt-4">
-            <p className="text-sm font-medium text-gray-700 mb-2">
+            <p className="text-base font-medium text-gray-700 mb-2">
               Quick Status Change:
             </p>
-            <div className="flex flex-wrap gap-2">
+            <div className="grid grid-cols-2 gap-2">
               {(
                 [
                   "off_duty",
@@ -271,7 +278,7 @@ export const DriverStatusCard: React.FC<DriverStatusCardProps> = ({
                   size="sm"
                   onClick={() => handleStatusUpdate(statusOption)}
                   disabled={updateStatusMutation.isPending}
-                  className="text-xs"
+                  className="text-xs py-[0.5rem] rounded-md"
                 >
                   {getDutyStatusDisplay(statusOption)}
                 </Button>
