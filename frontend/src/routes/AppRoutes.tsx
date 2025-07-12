@@ -11,9 +11,9 @@ import { PublicRoute } from "../components/Auth/PublicRoute";
 
 
 export function AppRoutes() { 
-    const { isLoading } = useAuth();
+    const { isInitializing } = useAuth();
 
-    if (isLoading) {
+    if (isInitializing) {
         return (
             <div className="min-h-screen flex items-center justify-center">
                 <LoadingSpinner size="large" />

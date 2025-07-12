@@ -10,10 +10,10 @@ interface ProtectedRouteProps {
 
 
 export function ProtectedRoute({ children }: ProtectedRouteProps) { 
-    const { isAuthenticated, isLoading } = useAuth();
+    const { isAuthenticated, isInitializing } = useAuth();
     const location = useLocation();
 
-    if (isLoading) {
+    if (isInitializing) {
         return (
             <div className="min-h-screen flex items-center justify-center">
                 <LoadingSpinner size="large" />

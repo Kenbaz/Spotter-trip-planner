@@ -10,25 +10,22 @@ export function LoginPage() {
   const [username, setUsername] = useState("");
   const [password, setPassword] = useState("");
   const [error, setError] = useState("");
-  const [isLoading, setIsLoading] = useState(false);
 
-  const { login } = useAuth();
-
+  const { login, isLoggingIn } = useAuth(); 
+  
   const handleSubmit = async (e: FormEvent) => {
     e.preventDefault();
     setError("");
-    setIsLoading(true);
 
     try {
       const result = await login(username, password);
       if (!result.success) {
         setError(result.error || "Login failed");
       }
+      // If login is successful, the auth context will update and redirect automatically
     } catch (err) {
-        console.error("Login error:", err);
+      console.error("Login error:", err);
       setError("An unexpected error occurred");
-    } finally {
-      setIsLoading(false);
     }
   };
 
@@ -65,7 +62,8 @@ export function LoginPage() {
                 placeholder="Enter your username"
                 required
                 autoComplete="username"
-                disabled={isLoading}
+                disabled={isLoggingIn}
+                className="text-gray-900"
               />
 
               <Input
@@ -76,16 +74,17 @@ export function LoginPage() {
                 placeholder="Enter your password"
                 required
                 autoComplete="current-password"
-                disabled={isLoading}
+                disabled={isLoggingIn}
+                className="text-gray-900"
               />
 
               <Button
                 type="submit"
                 className="w-full"
-                isLoading={isLoading}
-                disabled={!username || !password}
+                isLoading={isLoggingIn}
+                disabled={!username || !password || isLoggingIn}
               >
-                {isLoading ? "Signing in..." : "Sign In"}
+                {isLoggingIn ? "Signing in..." : "Sign In"}
               </Button>
             </form>
           </CardContent>

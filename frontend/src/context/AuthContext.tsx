@@ -5,7 +5,8 @@ import type { User } from "../types";
 
 export interface AuthContextType {
   user: User | null;
-  isLoading: boolean;
+  isInitializing: boolean;
+  isLoggingIn: boolean;
   isAuthenticated: boolean;
   login: (
     username: string,
@@ -26,19 +27,19 @@ interface AuthProviderProps {
 
 export function AuthProvider({ children }: AuthProviderProps) {
   const [user, setUser] = useState<User | null>(null);
-  const [isLoading, setIsLoading] = useState(true);
+  const [isInitializing, setIsInitializing] = useState(true);
+  const [isLoggingIn, setIsLoggingIn] = useState(false);
   const [initializationAttempted, setInitializationAttempted] = useState(false);
 
   const isAuthenticated = !!user && !!authService.getAccessToken();
 
-  // Memoized initialization function
   const initializeAuth = useCallback(async () => {
     if (initializationAttempted) {
       return;
     }
 
     try {
-      setIsLoading(true);
+      setIsInitializing(true);
       console.log("Initializing authentication...");
 
       // First check if we have tokens stored
@@ -76,13 +77,10 @@ export function AuthProvider({ children }: AuthProviderProps) {
         setUser(currentUser);
       } else {
         console.log("Failed to get current user info");
-        // If we have valid tokens but can't get user info, still maintain auth state
         if (authService.isAuthenticated()) {
           console.log(
             "Valid token exists, but API call failed - this could be temporary"
           );
-          // For now, we'll set user to null and let them re-login
-          // In a production app, you might want to retry or show a different error
           setUser(null);
         } else {
           console.log("No valid tokens, user not authenticated");
@@ -101,7 +99,7 @@ export function AuthProvider({ children }: AuthProviderProps) {
         setUser(null);
       }
     } finally {
-      setIsLoading(false);
+      setIsInitializing(false);
       setInitializationAttempted(true);
     }
   }, [initializationAttempted]);
@@ -142,12 +140,12 @@ export function AuthProvider({ children }: AuthProviderProps) {
 
   const login = async (username: string, password: string) => {
     try {
-      setIsLoading(true);
+      setIsLoggingIn(true);
       const result = await authService.login(username, password);
 
       if (result.success && result.user) {
         setUser(result.user);
-        setInitializationAttempted(true); // Mark as initialized after successful login
+        setInitializationAttempted(true);
         return { success: true };
       }
 
@@ -159,20 +157,20 @@ export function AuthProvider({ children }: AuthProviderProps) {
         error: error instanceof Error ? error.message : "Login failed",
       };
     } finally {
-      setIsLoading(false);
+      setIsLoggingIn(false);
     }
   };
 
   const logout = async () => {
     try {
-      setIsLoading(true);
+      setIsInitializing(true);
       await authService.logout();
     } catch (error) {
       console.error("Logout error:", error);
     } finally {
       setUser(null);
-      setInitializationAttempted(false); // Reset initialization state
-      setIsLoading(false);
+      setInitializationAttempted(false);
+      setIsInitializing(false);
     }
   };
 
@@ -187,7 +185,6 @@ export function AuthProvider({ children }: AuthProviderProps) {
         return false;
       }
 
-      // If we had a minimal user object, try to get full user data
       if (user && user.id === 0) {
         try {
           const currentUser = await authService.getCurrentUser();
@@ -199,7 +196,6 @@ export function AuthProvider({ children }: AuthProviderProps) {
             "Could not fetch full user data after token refresh:",
             error
           );
-          // Keep the minimal user object if we can't get full data
         }
       }
 
@@ -214,7 +210,8 @@ export function AuthProvider({ children }: AuthProviderProps) {
 
   const value = {
     user,
-    isLoading,
+    isInitializing,
+    isLoggingIn,
     isAuthenticated,
     login,
     logout,

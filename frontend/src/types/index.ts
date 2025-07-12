@@ -28,6 +28,8 @@ export interface ApiError {
     data?: {
       detail?: string;
       non_field_errors?: string[];
+      error?: string;
+      message?: string;
     };
   };
   code?: string;

@@ -121,16 +121,52 @@ class AuthService {
       console.error("Login error details:", error);
 
       const apiError = error as ApiError;
-      console.error("Error response:", apiError.response);
+      console.error("Error response:", apiError.response?.data);
 
       let errorMessage = "Login failed";
 
-      if (apiError.response?.data?.detail) {
-        errorMessage = apiError.response.data.detail;
-      } else if (apiError.response?.data?.non_field_errors?.[0]) {
-        errorMessage = apiError.response.data.non_field_errors[0];
-      } else if (apiError.message) {
+      if (apiError.response?.data) {
+        const errorData = apiError.response.data;
+
+        if (errorData.detail) {
+          errorMessage = errorData.detail;
+        } else if (errorData.non_field_errors && Array.isArray(errorData.non_field_errors)) {
+          errorMessage = errorData.non_field_errors[0];
+        } else if (errorData.error) {
+          errorMessage = errorData.error;
+        } else if (errorData.message) {
+          errorMessage = errorData.message;
+        } else if (typeof errorData === "string") {
+          errorMessage = errorData;
+        }
+      } else if (apiError.message) { 
         errorMessage = apiError.message;
+      }
+
+      if (
+        errorMessage.toLowerCase().includes("invalid credentials") ||
+        errorMessage.toLowerCase().includes("authentication failed") ||
+        errorMessage.toLowerCase().includes("invalid username") ||
+        errorMessage.toLowerCase().includes("invalid password") ||
+        errorMessage.toLowerCase().includes("unable to log in")
+      ) {
+        errorMessage =
+          "Invalid username or password. Please check your credentials and try again.";
+      } else if (apiError.response?.status === 400) {
+        errorMessage =
+          "Invalid username or password. Please check your credentials and try again.";
+      } else if (apiError.response?.status === 401) {
+        errorMessage =
+          "Invalid username or password. Please check your credentials and try again.";
+      } else if (apiError.response?.status === 429) {
+        errorMessage =
+          "Too many login attempts. Please wait a moment and try again.";
+      } else if (apiError.response?.status && apiError.response.status >= 500) {
+        errorMessage =
+          "Server error. Please try again later or contact support.";
+      } else if (!apiError.response) {
+        errorMessage =
+          "Unable to connect to the server. Please check your internet connection.";
       }
 
       return {

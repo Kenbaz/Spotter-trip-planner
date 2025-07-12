@@ -38,6 +38,14 @@ class ApiClient {
     this.failedQueue = [];
   }
 
+  // Check if the request is to an authentication endpoint
+  private isAuthenticationEndpoint(url?: string): boolean {
+    if (!url) return false;
+
+    const authEndpoints = ["/login/", "/auth/refresh/", "/auth/verify/"];
+    return authEndpoints.some((endpoint) => url.includes(endpoint));
+  }
+
   private setupInterceptors(): void {
     // Request interceptor to add auth token
     this.client.interceptors.request.use(
@@ -58,6 +66,14 @@ class ApiClient {
       (response) => response,
       async (error) => {
         const originalRequest = error.config;
+
+        // Don't try to refresh tokens for authentication endpoints
+        if (this.isAuthenticationEndpoint(originalRequest.url)) {
+          console.log(
+            "401 error on authentication endpoint, not attempting token refresh"
+          );
+          return Promise.reject(error);
+        }
 
         // If unauthorized and we haven't already tried to refresh
         if (error.response?.status === 401 && !originalRequest._retry) {
