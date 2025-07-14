@@ -18,7 +18,6 @@ iniconfig==2.1.0
 packaging==25.0
 pluggy==1.6.0
 polyline==2.0.2
-psycopg-binary==3.2.1
 psycopg2-binary==2.9.10
 PyJWT==2.10.1
 pytest==7.4.3
