@@ -50,7 +50,7 @@ import { TripActions } from "../components/UI/TripActions";
 import type { RoutePlanStop, TripELDLogsResponse } from "../types";
 import type { LatLngExpression } from "leaflet";
 import { motion } from "framer-motion";
-import { DeleteConfirmationModal } from "../components/UI/DeleteTripAction";
+import { DeleteConfirmationModal } from "../components/UI/DeleteTripModal";
 
 
 type TabType = "overview" | "map" | "stops" | "hos" | "compliance" | "eld_logs";
