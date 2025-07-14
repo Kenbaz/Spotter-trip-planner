@@ -18,7 +18,7 @@ class DriverCycleStatusService:
                 driver=driver,
                 cycle_start_date=timezone.now() - timedelta(days=7),
                 total_cycle_hours=0.0,
-                current_duty_status='Off_duty',
+                current_duty_status='off_duty',
                 current_status_start=timezone.now(),
                 today_driving_hours=0.0,
                 today_on_duty_hours=0.0,

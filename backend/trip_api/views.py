@@ -303,7 +303,7 @@ class TripViewSet(viewsets.ModelViewSet):
             return Response({
                 'success': True,
                 'message': f'Trip {trip_id} deleted successfully'
-            }, status=status.HTTP_204_NO_CONTENT)
+            }, status=status.HTTP_200_OK)
         
         except Exception as e:
             logger.error(f"Error deleting trip {str(e)}")

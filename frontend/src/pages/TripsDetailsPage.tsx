@@ -50,6 +50,7 @@ import { TripActions } from "../components/UI/TripActions";
 import type { RoutePlanStop, TripELDLogsResponse } from "../types";
 import type { LatLngExpression } from "leaflet";
 import { motion } from "framer-motion";
+import { DeleteConfirmationModal } from "../components/UI/DeleteTripAction";
 
 
 type TabType = "overview" | "map" | "stops" | "hos" | "compliance" | "eld_logs";
@@ -59,6 +60,7 @@ export function TripDetailPage() {
   const navigate = useNavigate();
   const [activeTab, setActiveTab] = useState<TabType>("overview");
   const [selectedLogIndex, setSelectedLogIndex] = useState(0);
+  const [showDeleteModal, setShowDeleteModal] = useState(false);
 
   const {
     data: tripResponse,
@@ -242,22 +244,29 @@ export function TripDetailPage() {
     }
   };
 
+  const handleDeleteClick = () => {
+    setShowDeleteModal(true);
+  }
+
+  const handleCancleDelete = () => { 
+    setShowDeleteModal(false);
+  }
+
   const handleDeleteTrip = async () => {
     if (!trip) return;
 
-    const confirmed = window.confirm(
-      `Are you sure you want to delete this trip? This action cannot be undone.`
-    );
-
-    if (confirmed) {
-      try {
-        await deleteTrip.mutateAsync(trip.trip_id);
-        navigate("/trips");
-      } catch (error) {
-        console.error("Failed to delete trip:", error);
-      }
+    try {
+      await deleteTrip.mutateAsync(trip.trip_id);
+      navigate("/trips");
+    } catch (error) {
+      console.error("Failed to delete trip:", error);
     }
   };
+
+  const handleDeleteConfirm = () => {
+    setShowDeleteModal(false);
+    handleDeleteTrip();
+  }
 
   const handleStopClick = (stop: RoutePlanStop) => {
     // Show stop details or navigate to stop tab
@@ -431,7 +440,7 @@ export function TripDetailPage() {
                   <Button
                     variant="danger"
                     leftIcon={<Trash2 className="w-4 h-4" />}
-                    onClick={handleDeleteTrip}
+                    onClick={handleDeleteClick}
                     isLoading={deleteTrip.isPending}
                     disabled={deleteTrip.isPending}
                   >
@@ -1350,6 +1359,17 @@ export function TripDetailPage() {
           />
         )}
       </motion.div>
+      <DeleteConfirmationModal
+        isOpen={showDeleteModal}
+        onClose={handleCancleDelete}
+        onConfirm={handleDeleteConfirm}
+        isLoading={deleteTrip.isPending}
+        tripTitle={
+          trip?.pickup_address && trip?.delivery_address
+            ? `${trip.pickup_address} → ${trip.delivery_address}`
+            : "this trip"
+        }
+      />
     </Layout>
   );
 }

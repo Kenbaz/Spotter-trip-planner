@@ -247,6 +247,13 @@ class TripService {
 
       const response = await apiClient.delete(`${this.BASE_URL}${tripId}/`);
 
+      if (response.status === 204) {
+        return {
+          success: true,
+          message: "Trip deleted successfully",
+        };
+      }
+
       if (!response.data || typeof response.data.success !== "boolean") {
         throw new Error("Invalid response data");
       }
