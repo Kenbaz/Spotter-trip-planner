@@ -26,7 +26,7 @@ DEBUG = os.getenv('DEBUG', 'False') == 'True'
 if ENVIRONMENT == 'production':
     ALLOWED_HOSTS = os.getenv('ALLOWED_HOSTS', '').split(',')
 
-    RENDER_DOMAIN = 'spotter-hos-trip-planner.onrender.com'
+    RENDER_DOMAIN = 'spotter-trip-planner-5dth.onrender.com'
     if RENDER_DOMAIN not in ALLOWED_HOSTS:
         ALLOWED_HOSTS.append(RENDER_DOMAIN)
 
@@ -38,7 +38,7 @@ else:
 ALLOWED_HOSTS.extend([
     'localhost',
     '127.0.0.1',
-    'spotter-hos-trip-planner.onrender.com',
+    'spotter-spotter-trip-planner-5dth.onrender.com',
     '.onrender.com'
 ])
 
@@ -133,7 +133,7 @@ WSGI_APPLICATION = 'Core_app.wsgi.application'
 # Database
 # https://docs.djangoproject.com/en/5.2/ref/settings/#databases
 
-# Database Configuration
+# Database Configuration - Updated for psycopg3 compatibility
 if ENVIRONMENT == 'production':
     DATABASES = {
         'default': dj_database_url.config(
