@@ -23,7 +23,24 @@ SECRET_KEY = os.environ.get('SECRET_KEY', secrets.token_hex(32))
 # SECURITY WARNING: don't run with debug turned on in production!
 DEBUG = os.getenv('DEBUG', 'False') == 'True'
 
-ALLOWED_HOSTS = os.environ.get('ALLOWED_HOSTS', 'localhost,127.0.0.1').split(',')
+if ENVIRONMENT == 'production':
+    ALLOWED_HOSTS = os.getenv('ALLOWED_HOSTS', '').split(',')
+
+    RENDER_DOMAIN = 'spotter-hos-trip-planner.onrender.com'
+    if RENDER_DOMAIN not in ALLOWED_HOSTS:
+        ALLOWED_HOSTS.append(RENDER_DOMAIN)
+
+    ALLOWED_HOSTS.append(f'.{RENDER_DOMAIN}')
+else:
+    ALLOWED_HOSTS = ['localhost', '127.0.0.1']
+
+
+ALLOWED_HOSTS.extend([
+    'localhost',
+    '127.0.0.1',
+    'spotter-hos-trip-planner.onrender.com',
+    '.onrender.com'
+])
 
 
 # Application definition
