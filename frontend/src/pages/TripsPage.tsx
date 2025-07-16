@@ -136,7 +136,7 @@ function FilterDropdown({
   );
 }
 
-export function TripsPage() {
+function TripsPage() {
   const [searchTerm, setSearchTerm] = useState("");
   const [statusFilter, setStatusFilter] = useState("all");
 
@@ -543,3 +543,5 @@ export function TripsPage() {
     </Layout>
   );
 }
+
+export default TripsPage;

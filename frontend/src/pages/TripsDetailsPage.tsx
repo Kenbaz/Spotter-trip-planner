@@ -55,7 +55,7 @@ import { DeleteConfirmationModal } from "../components/UI/DeleteTripModal";
 
 type TabType = "overview" | "map" | "stops" | "hos" | "compliance" | "eld_logs";
 
-export function TripDetailPage() {
+function TripDetailPage() {
   const { tripId } = useParams<{ tripId: string }>();
   const navigate = useNavigate();
   const [activeTab, setActiveTab] = useState<TabType>("overview");
@@ -1500,3 +1500,5 @@ function TripELDLogsSection({
     </div>
   );
 }
+
+export default TripDetailPage;

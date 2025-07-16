@@ -43,7 +43,7 @@ interface TripCounts {
   draft: number;
 }
 
-export function DashboardPage() {
+function DashboardPage() {
   const { user } = useAuth();
 
   // Fetch trips and driver status
@@ -543,3 +543,5 @@ export function DashboardPage() {
     </Layout>
   );
 }
+
+export default DashboardPage;

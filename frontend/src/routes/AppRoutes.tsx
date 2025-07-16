@@ -2,12 +2,17 @@ import { Routes, Route, Navigate } from "react-router-dom";
 import { useAuth } from "../hooks/useAuth";
 import { LoadingSpinner } from "../components/UI/LoadingSpinner";
 import { LoginPage } from "../pages/LoginPage";
-import { DashboardPage } from "../pages/Dashboard";
-import { TripsPage } from "../pages/TripsPage";
-import { TripDetailPage } from "../pages/TripsDetailsPage";
+// import DashboardPage from "../pages/Dashboard";
+// import TripsPage from "../pages/TripsPage";
+// import TripDetailPage from "../pages/TripsDetailsPage";
 import { CreateTripPage } from "../pages/CreateTripsPage";
 import { ProtectedRoute } from "../components/Auth/ProtectedRoute";
 import { PublicRoute } from "../components/Auth/PublicRoute";
+import {
+  LazyLoadedDashboardPage,
+  LazyLoadedTripsPage,
+  LazyLoadedTripDetailPage,
+} from "../components/LazyComponents/LazyComponents";
 
 
 export function AppRoutes() { 
@@ -35,7 +40,7 @@ export function AppRoutes() {
           path="/"
           element={
             <ProtectedRoute>
-              <DashboardPage />
+              <LazyLoadedDashboardPage />
             </ProtectedRoute>
           }
         />
@@ -43,7 +48,7 @@ export function AppRoutes() {
           path="/dashboard"
           element={
             <ProtectedRoute>
-              <DashboardPage />
+              <LazyLoadedDashboardPage />
             </ProtectedRoute>
           }
         />
@@ -52,7 +57,7 @@ export function AppRoutes() {
           path="/trips"
           element={
             <ProtectedRoute>
-              <TripsPage />
+              <LazyLoadedTripsPage />
             </ProtectedRoute>
           }
         />
@@ -70,7 +75,7 @@ export function AppRoutes() {
           path="/trips/:tripId"
           element={
             <ProtectedRoute>
-              <TripDetailPage />
+              <LazyLoadedTripDetailPage />
             </ProtectedRoute>
           }
         />
