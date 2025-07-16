@@ -373,7 +373,7 @@ export function CreateTripPage() {
         ...prepareDriverCycleData(currentDriverStatus!),
       };
 
-      console.log("Creating trip with starting conditions:", tripData);
+      // console.log("Creating trip with starting conditions:", tripData);
 
       const result = await createTripMutation.mutateAsync(tripData);
 

@@ -71,12 +71,6 @@ function TripDetailPage() {
     refetch: refetchTrip,
   } = useGetTripDetails(tripId);
 
-  const seoData = {
-    title: tripResponse ? `Trip ${tripResponse.trip.trip_id} - ${tripResponse.trip.status}` : "Trip Details",
-    description: tripResponse ? `Trip details for ${tripResponse.trip.current_address} → ${tripResponse.trip.pickup_address} → ${tripResponse.trip.delivery_address}` : "View trip details, routes, and compliance information.",
-    keywords: tripResponse ? `trip ${tripResponse.trip.trip_id}, ${tripResponse.trip.status}, route details, HOS compliance` : "trip details, route info, HOS compliance",
-  };
-
   const { data: complianceResponse, isLoading: isComplianceLoading } =
     useGetTripComplianceReport(tripId);
 
@@ -112,8 +106,20 @@ function TripDetailPage() {
   const exportTripLogsMutation = useExportTripELDLogs();
 
   const trip = tripResponse?.trip;
-  console.log("trips data:", trip);
+  // console.log("trips data:", trip);
   const complianceReport = complianceResponse?.compliance_report;
+
+  const seoData = {
+    title: trip
+      ? `Trip ${trip.trip_id} - ${trip.status}`
+      : "Trip Details",
+    description: trip
+      ? `Trip details for ${trip.current_address} → ${trip.pickup_address} → ${trip.delivery_address}`
+      : "View trip details, routes, and compliance information.",
+    keywords: trip
+      ? `trip ${trip.trip_id}, ${trip.status}, route details, HOS compliance`
+      : "trip details, route info, HOS compliance",
+  };
 
   const { routeCoordinates, routeStops } = useMap({ trip });
 
@@ -367,7 +373,7 @@ function TripDetailPage() {
       />
       <Layout>
         <motion.div
-          className="space-y-6 mt-14 pb-[15%] pt-4 md:mt-0"
+          className="space-y-6 mt-14 pb-[15%] md:pb-[4%] xl:pb-0 pt-4 md:mt-0"
           initial={{ opacity: 0 }}
           animate={{ opacity: 1 }}
           transition={{

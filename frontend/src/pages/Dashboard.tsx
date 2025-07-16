@@ -171,7 +171,7 @@ function DashboardPage() {
       />
       <Layout>
         <motion.div
-          className="w-full pb-[10%] mt-[17%] md:mt-4 space-y-6"
+          className="w-full pb-[10%] xl:pb-0 mt-[17%] md:mt-4 space-y-6"
           initial={{ opacity: 0 }}
           animate={{ opacity: 1 }}
           transition={{

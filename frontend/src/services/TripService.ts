@@ -34,7 +34,7 @@ class TripService {
   private readonly BASE_URL = "/api/trips/";
 
   private handleError(error: unknown, context: string): never {
-    console.error(`TripService Error in ${context}:`, error);
+    // console.error(`TripService Error in ${context}:`, error);
 
     if (error && typeof error === "object" && "response" in error) {
       const axiosError = error as {
@@ -138,7 +138,7 @@ class TripService {
         };
       }
 
-      console.error("Unexpected response format:", response.data);
+      // console.error("Unexpected response format:", response.data);
       throw new Error("Invalid response data format");
     } catch (error) {
       this.handleError(error, "Get my trips");
