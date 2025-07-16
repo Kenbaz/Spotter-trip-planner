@@ -3,6 +3,7 @@ import { motion } from "framer-motion";
 import { useSidebar } from "../../context/SidebarContext";
 import { useAuth } from "../../hooks/useAuth";
 import { useState } from "react";
+import { Link } from "react-router-dom";
 
 export function Header() {
   const { user, logout } = useAuth();
@@ -49,34 +50,23 @@ export function Header() {
           </motion.button>
 
           {/* Logo and app name */}
-          <motion.div
-            className="flex items-center space-x-3"
-            initial={{ opacity: 0, x: -20 }}
-            animate={{ opacity: 1, x: 0 }}
-            transition={{
-              type: "spring",
-              stiffness: 300,
-              damping: 25,
-              delay: 0.1,
-            }}
-          >
-            <motion.div
-              className="w-8 h-8 bg-blue-600 rounded-lg flex items-center justify-center"
-              whileHover={{
-                scale: 1.1,
-                rotate: 5,
-              }}
-              transition={{ type: "spring", stiffness: 400, damping: 20 }}
+          <Link to="/">
+            <div
+              className="flex items-center space-x-3"
             >
-              <span className="text-white font-bold text-sm">S</span>
-            </motion.div>
-            <div>
-              <h1 className="text-lg font-semibold text-gray-900">
-                Spotter HOS
-              </h1>
-              <p className="text-xs text-gray-500">Trip Planner</p>
+              <div
+                className="w-8 h-8 bg-blue-600 rounded-lg flex items-center justify-center"
+              >
+                <span className="text-white font-bold text-sm">S</span>
+              </div>
+              <div>
+                <h1 className="text-lg font-semibold text-gray-900">
+                  Spotter HOS
+                </h1>
+                <p className="text-xs text-gray-500">Trip Planner</p>
+              </div>
             </div>
-          </motion.div>
+          </Link>
         </div>
 
         {/* Right side, User info and actions */}
