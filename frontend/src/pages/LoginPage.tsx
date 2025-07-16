@@ -5,6 +5,7 @@ import { Button } from "../components/UI/Button";
 import { Input } from "../components/UI/Input";
 import { Card, CardContent } from "../components/UI/Card";
 import { AlertCircle } from "lucide-react";
+import { SEO } from "../components/SEO/SEO";
 
 export function LoginPage() {
   const [username, setUsername] = useState("");
@@ -31,6 +32,12 @@ export function LoginPage() {
 
   return (
     <div className="min-h-screen flex items-center justify-center bg-gray-50 py-12 px-4 sm:px-6 lg:px-8">
+      <SEO
+        title="Driver login"
+        description="Sign in to your Spotter HOS driver account to access trip planning, compliance tracking, and generate routes"
+        keywords="driver login, spotter hos, truck driver portal, hours of service login, trucking app"
+        noIndex={true}
+      />
       <div className="max-w-md w-full space-y-8">
         {/* Header */}
         <div className="text-center">

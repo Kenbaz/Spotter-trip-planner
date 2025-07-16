@@ -23,6 +23,7 @@ import { useAddressInput } from "../hooks/useAddressInput";
 import type { CreateTripRequest, TripSettings, CurrentDriverStatus } from "../types";
 import { DriverStatusCard } from "../components/UI/DriverStatusCard";
 import { motion } from "framer-motion";
+import { SEO } from "../components/SEO/SEO";
 
 
 interface FormErrors {
@@ -422,231 +423,242 @@ export function CreateTripPage() {
   };
 
   return (
-    <Layout>
-      <motion.div
-        className="max-w-4xl mx-auto mt-14 md:mt-0 pb-[12%] md:pb-0 pt-4 space-y-6"
-        initial={{ opacity: 0 }}
-        animate={{ opacity: 1 }}
-        transition={{
-          type: "spring",
-          stiffness: 300,
-          damping: 25,
-          duration: 1,
-        }}
-      >
-        <div>
-          <h1 className="text-2xl font-bold text-gray-900">Plan New Trip</h1>
-          <p className="text-gray-600">Create a new HOS-compliant trip</p>
-        </div>
-
-        {/* Current Driver HOS Status */}
-        <DriverStatusCard
-          onStatusLoad={handleDriverStatusLoad}
-          showActions={false}
-          className="mb-6"
-        />
-
-        {/* Show warning if driver status indicates issues */}
-        {currentDriverStatus?.needs_immediate_break && (
-          <Card className="border-red-200 bg-red-50">
-            <CardContent className="p-4">
-              <div className="flex items-start space-x-3">
-                <AlertCircle className="w-5 h-5 text-red-600 mt-0.5" />
-                <div>
-                  <h4 className="font-medium text-red-800">Break Required</h4>
-                  <p className="text-sm text-red-700 mt-1">
-                    You must take a 30-minute break before starting a new trip.
-                  </p>
-                </div>
-              </div>
-            </CardContent>
-          </Card>
-        )}
-
-        {/* Trip Form */}
-        <form onSubmit={handleSubmit} className="space-y-6">
-          <Card className="px-3 md:px-4">
-            <CardHeader>
-              <CardTitle className="flex items-center space-x-2">
-                <RouteIcon className="w-5 h-5" />
-                <span>Trip Details</span>
-              </CardTitle>
-            </CardHeader>
-            <CardContent className="space-y-6">
-              <div className="space-y-6">
-                {/* Current Location with GPS button */}
-
-                <div className="md:col-span-3 relative">
-                  <AddressAutocomplete
-                    label="Current Location"
-                    value={currentLocation.addressData.address}
-                    onChange={currentLocation.handleAddressChange}
-                    onCoordinatesChange={
-                      currentLocation.handleCoordinatesChange
-                    }
-                    placeholder="Enter your current location..."
-                    error={errors.current_address}
-                    disabled={isFormDisabled}
-                    required
-                    autoFocus
-                  />
-                  <Button
-                    type="button"
-                    variant="secondary"
-                    onClick={handleGetCurrentLocation}
-                    disabled={isFormDisabled}
-                    className="absolute bg-transparent hover:bg-transparent top-[46%] -right-2 md:right-0 z-20"
-                    title="Current Address"
-                  >
-                    <Navigation className="w-[1rem] h-[1rem] md:h-5 md:w-5 text-gray-500 hover:text-gray-800" />
-                  </Button>
-                </div>
-
-                {/* Pickup Location */}
-                <AddressAutocomplete
-                  label="Pickup Location"
-                  value={pickupLocation.addressData.address}
-                  onChange={pickupLocation.handleAddressChange}
-                  onCoordinatesChange={pickupLocation.handleCoordinatesChange}
-                  placeholder="Enter pickup location..."
-                  error={errors.pickup_address}
-                  disabled={isFormDisabled}
-                  required
-                />
-
-                {/* Delivery Location */}
-                <AddressAutocomplete
-                  label="Delivery Location"
-                  value={deliveryLocation.addressData.address}
-                  onChange={deliveryLocation.handleAddressChange}
-                  onCoordinatesChange={deliveryLocation.handleCoordinatesChange}
-                  placeholder="Enter delivery location..."
-                  error={errors.delivery_address}
-                  disabled={isFormDisabled}
-                  required
-                />
-              </div>
-
-              {/* Departure Time and Settings */}
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-                <div className="space-y-2">
-                  <label className="text-sm font-medium text-gray-700 flex items-center space-x-2">
-                    <Clock className="w-4 h-4" />
-                    <span>Departure Date & Time</span>
-                  </label>
-                  <Input
-                    type="datetime-local"
-                    value={tripSettings.departure_datetime}
-                    onChange={(e) =>
-                      setTripSettings((prev) => ({
-                        ...prev,
-                        departure_datetime: e.target.value,
-                      }))
-                    }
-                    disabled={isFormDisabled}
-                    error={errors.departure_datetime}
-                    required
-                    className="text-gray-900"
-                  />
-                </div>
-
-                <div className="space-y-2">
-                  <label className="text-sm font-medium text-gray-700">
-                    Max Fuel Distance (miles)
-                  </label>
-                  <Input
-                    type="number"
-                    value={tripSettings.max_fuel_distance_miles}
-                    onChange={(e) =>
-                      setTripSettings((prev) => ({
-                        ...prev,
-                        max_fuel_distance_miles:
-                          parseInt(e.target.value) || 1000,
-                      }))
-                    }
-                    disabled={isFormDisabled}
-                    min="200"
-                    max="1200"
-                    className="text-gray-900"
-                  />
-                </div>
-              </div>
-
-              {/* Duration Settings */}
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-                <div className="space-y-2">
-                  <label className="text-sm font-medium text-gray-700">
-                    Pickup Duration (minutes)
-                  </label>
-                  <Input
-                    type="number"
-                    value={tripSettings.pickup_duration_minutes}
-                    onChange={(e) =>
-                      setTripSettings((prev) => ({
-                        ...prev,
-                        pickup_duration_minutes: parseInt(e.target.value) || 60,
-                      }))
-                    }
-                    disabled={isFormDisabled}
-                    min="15"
-                    max="480"
-                    className="text-gray-900"
-                  />
-                </div>
-                <div className="space-y-2">
-                  <label className="text-sm font-medium text-gray-700">
-                    Delivery Duration (minutes)
-                  </label>
-                  <Input
-                    type="number"
-                    value={tripSettings.delivery_duration_minutes}
-                    onChange={(e) =>
-                      setTripSettings((prev) => ({
-                        ...prev,
-                        delivery_duration_minutes:
-                          parseInt(e.target.value) || 60,
-                      }))
-                    }
-                    disabled={isFormDisabled}
-                    min="15"
-                    max="480"
-                    className="text-gray-900"
-                  />
-                </div>
-              </div>
-            </CardContent>
-          </Card>
-
-          {/* Submit Actions */}
-          <div className="flex justify-end space-x-4">
-            <Link to="/trips">
-              <Button
-                type="button"
-                variant="danger"
-                disabled={isFormDisabled}
-              >
-                Cancel
-              </Button>
-            </Link>
-            <Button
-              type="submit"
-              disabled={
-                isFormDisabled || currentDriverStatus?.needs_immediate_break
-              }
-              isLoading={createTripMutation.isPending}
-              leftIcon={<Calculator className="w-4 h-4" />}
-            >
-              {createTripMutation.isPending
-                ? "Creating Trip..."
-                : currentDriverStatus?.needs_immediate_break
-                ? "Break Required"
-                : !isStatusLoaded
-                ? "Loading Status..."
-                : "Create Trip"}
-            </Button>
+    <>
+      <SEO
+        title="Create New Trip"
+        description="Plan a new HOS-compliant trip with automatic compliance checking and route generation."
+        keywords="create trip, HOS compliance, trip planning, trucking, logistics"
+      />
+      <Layout>
+        <motion.div
+          className="max-w-4xl mx-auto mt-14 md:mt-0 pb-[17%] md:pb-0 pt-4 space-y-6"
+          initial={{ opacity: 0 }}
+          animate={{ opacity: 1 }}
+          transition={{
+            type: "spring",
+            stiffness: 300,
+            damping: 25,
+            duration: 1,
+          }}
+        >
+          <div>
+            <h1 className="text-2xl font-bold text-gray-900">Plan New Trip</h1>
+            <p className="text-gray-600">Create a new HOS-compliant trip</p>
           </div>
-        </form>
-      </motion.div>
-    </Layout>
+
+          {/* Current Driver HOS Status */}
+          <DriverStatusCard
+            onStatusLoad={handleDriverStatusLoad}
+            showActions={false}
+            className="mb-6"
+          />
+
+          {/* Show warning if driver status indicates issues */}
+          {currentDriverStatus?.needs_immediate_break && (
+            <Card className="border-red-200 bg-red-50">
+              <CardContent className="p-4">
+                <div className="flex items-start space-x-3">
+                  <AlertCircle className="w-5 h-5 text-red-600 mt-0.5" />
+                  <div>
+                    <h4 className="font-medium text-red-800">Break Required</h4>
+                    <p className="text-sm text-red-700 mt-1">
+                      You must take a 30-minute break before starting a new
+                      trip.
+                    </p>
+                  </div>
+                </div>
+              </CardContent>
+            </Card>
+          )}
+
+          {/* Trip Form */}
+          <form onSubmit={handleSubmit} className="space-y-6">
+            <Card className="px-3 md:px-4">
+              <CardHeader>
+                <CardTitle className="flex items-center space-x-2">
+                  <RouteIcon className="w-5 h-5" />
+                  <span>Trip Details</span>
+                </CardTitle>
+              </CardHeader>
+              <CardContent className="space-y-6">
+                <div className="space-y-6">
+                  {/* Current Location with GPS button */}
+
+                  <div className="md:col-span-3 relative">
+                    <AddressAutocomplete
+                      label="Current Location"
+                      value={currentLocation.addressData.address}
+                      onChange={currentLocation.handleAddressChange}
+                      onCoordinatesChange={
+                        currentLocation.handleCoordinatesChange
+                      }
+                      placeholder="Enter your current location..."
+                      error={errors.current_address}
+                      disabled={isFormDisabled}
+                      required
+                      autoFocus
+                    />
+                    <Button
+                      type="button"
+                      variant="secondary"
+                      onClick={handleGetCurrentLocation}
+                      disabled={isFormDisabled}
+                      className="absolute bg-transparent hover:bg-transparent top-[46%] -right-2 md:right-0 z-20"
+                      title="Current Address"
+                    >
+                      <Navigation className="w-[1rem] h-[1rem] md:h-5 md:w-5 text-gray-500 hover:text-gray-800" />
+                    </Button>
+                  </div>
+
+                  {/* Pickup Location */}
+                  <AddressAutocomplete
+                    label="Pickup Location"
+                    value={pickupLocation.addressData.address}
+                    onChange={pickupLocation.handleAddressChange}
+                    onCoordinatesChange={pickupLocation.handleCoordinatesChange}
+                    placeholder="Enter pickup location..."
+                    error={errors.pickup_address}
+                    disabled={isFormDisabled}
+                    required
+                  />
+
+                  {/* Delivery Location */}
+                  <AddressAutocomplete
+                    label="Delivery Location"
+                    value={deliveryLocation.addressData.address}
+                    onChange={deliveryLocation.handleAddressChange}
+                    onCoordinatesChange={
+                      deliveryLocation.handleCoordinatesChange
+                    }
+                    placeholder="Enter delivery location..."
+                    error={errors.delivery_address}
+                    disabled={isFormDisabled}
+                    required
+                  />
+                </div>
+
+                {/* Departure Time and Settings */}
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                  <div className="space-y-2">
+                    <label className="text-sm font-medium text-gray-700 flex items-center space-x-2">
+                      <Clock className="w-4 h-4" />
+                      <span>Departure Date & Time</span>
+                    </label>
+                    <Input
+                      type="datetime-local"
+                      value={tripSettings.departure_datetime}
+                      onChange={(e) =>
+                        setTripSettings((prev) => ({
+                          ...prev,
+                          departure_datetime: e.target.value,
+                        }))
+                      }
+                      disabled={isFormDisabled}
+                      error={errors.departure_datetime}
+                      required
+                      className="text-gray-900"
+                    />
+                  </div>
+
+                  <div className="space-y-2">
+                    <label className="text-sm font-medium text-gray-700">
+                      Max Fuel Distance (miles)
+                    </label>
+                    <Input
+                      type="number"
+                      value={tripSettings.max_fuel_distance_miles}
+                      onChange={(e) =>
+                        setTripSettings((prev) => ({
+                          ...prev,
+                          max_fuel_distance_miles:
+                            parseInt(e.target.value) || 1000,
+                        }))
+                      }
+                      disabled={isFormDisabled}
+                      min="200"
+                      max="1200"
+                      className="text-gray-900"
+                    />
+                  </div>
+                </div>
+
+                {/* Duration Settings */}
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                  <div className="space-y-2">
+                    <label className="text-sm font-medium text-gray-700">
+                      Pickup Duration (minutes)
+                    </label>
+                    <Input
+                      type="number"
+                      value={tripSettings.pickup_duration_minutes}
+                      onChange={(e) =>
+                        setTripSettings((prev) => ({
+                          ...prev,
+                          pickup_duration_minutes:
+                            parseInt(e.target.value) || 60,
+                        }))
+                      }
+                      disabled={isFormDisabled}
+                      min="15"
+                      max="480"
+                      className="text-gray-900"
+                    />
+                  </div>
+                  <div className="space-y-2">
+                    <label className="text-sm font-medium text-gray-700">
+                      Delivery Duration (minutes)
+                    </label>
+                    <Input
+                      type="number"
+                      value={tripSettings.delivery_duration_minutes}
+                      onChange={(e) =>
+                        setTripSettings((prev) => ({
+                          ...prev,
+                          delivery_duration_minutes:
+                            parseInt(e.target.value) || 60,
+                        }))
+                      }
+                      disabled={isFormDisabled}
+                      min="15"
+                      max="480"
+                      className="text-gray-900"
+                    />
+                  </div>
+                </div>
+              </CardContent>
+            </Card>
+
+            {/* Submit Actions */}
+            <div className="flex justify-end space-x-4">
+              <Link to="/trips">
+                <Button
+                  type="button"
+                  variant="danger"
+                  disabled={isFormDisabled}
+                >
+                  Cancel
+                </Button>
+              </Link>
+              <Button
+                type="submit"
+                disabled={
+                  isFormDisabled || currentDriverStatus?.needs_immediate_break
+                }
+                isLoading={createTripMutation.isPending}
+                leftIcon={<Calculator className="w-4 h-4" />}
+              >
+                {createTripMutation.isPending
+                  ? "Creating Trip..."
+                  : currentDriverStatus?.needs_immediate_break
+                  ? "Break Required"
+                  : !isStatusLoaded
+                  ? "Loading Status..."
+                  : "Create Trip"}
+              </Button>
+            </div>
+          </form>
+        </motion.div>
+      </Layout>
+    </>
   );
 }

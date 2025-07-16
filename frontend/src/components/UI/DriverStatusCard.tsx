@@ -73,10 +73,11 @@ export const DriverStatusCard: React.FC<DriverStatusCardProps> = ({
 
   if (isLoading) {
     return (
-      <Card className={`border-gray-100 ${className}`}>
+      <Card className={`border-gray-100 shadow-none ${className}`}>
         <CardContent className="flex items-center justify-center p-6">
-          <LoadingSpinner size="medium" />
-          <span className="ml-2">Loading current HOS status...</span>
+          <div className="flex items-center">
+            <LoadingSpinner size="medium" />
+          </div>
         </CardContent>
       </Card>
     );

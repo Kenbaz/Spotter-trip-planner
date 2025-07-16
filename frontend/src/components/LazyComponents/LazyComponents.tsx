@@ -1,5 +1,5 @@
 import { lazy, Suspense } from "react";
-import { LoadingSpinner } from "../UI/LoadingSpinner";
+// import { LoadingSpinner } from "../UI/LoadingSpinner";
 
 const DashboardPage = lazy(() => import("../../pages/Dashboard"));
 const TripsPage = lazy(() => import("../../pages/TripsPage"));
@@ -8,7 +8,7 @@ const TripDetailPage = lazy(() => import("../../pages/TripsDetailsPage"));
 
 const LazyLoadedComponent = ({ children }: { children: React.ReactNode }) => {
     return (
-        <Suspense fallback={<LoadingSpinner size="large" />}>
+        <Suspense>
             {children}
         </Suspense>
     )
