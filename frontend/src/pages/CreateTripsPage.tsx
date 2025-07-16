@@ -431,7 +431,7 @@ export function CreateTripPage() {
       />
       <Layout>
         <motion.div
-          className="max-w-4xl mx-auto mt-14 md:mt-0 pb-[17%] md:pb-0 pt-4 space-y-6"
+          className="max-w-4xl mx-auto mt-14 md:mt-0 pb-[20%] md:pb-0 pt-4 space-y-6"
           initial={{ opacity: 0 }}
           animate={{ opacity: 1 }}
           transition={{
@@ -556,7 +556,8 @@ export function CreateTripPage() {
                       disabled={isFormDisabled}
                       error={errors.departure_datetime}
                       required
-                      className="text-gray-900"
+                      className="text-gray-900 w-full !max-w-full"
+                      style={{ maxWidth: "100%", width: "100%" }}
                     />
                   </div>
 

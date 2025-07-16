@@ -299,7 +299,7 @@ function TripsPage() {
       />
       <Layout>
         <motion.div
-          className="space-y-6 mt-[14%] pb-[18%] md:mt-0 md:h-full pt-4"
+          className="space-y-6 mt-[14%] pb-[20%] md:mt-0 md:h-full pt-4"
           initial={{ opacity: 0 }}
           animate={{ opacity: 1 }}
           transition={{
