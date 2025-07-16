@@ -1,18 +1,17 @@
 import React, { useState, useEffect, useRef, useCallback } from "react";
-import { MapPin, CheckCircle, AlertCircle, Loader2, CircleX } from "lucide-react";
+import { MapPin, CheckCircle, AlertCircle, Loader2, X } from "lucide-react";
 import { useGeocodeMutation } from "../../hooks/useTripQueries";
 
-
 interface AddressSuggestion {
-    id: string;
-    display_name: string;
-    formatted_address: string;
-    latitude: number;
-    longitude: number;
-    confidence: number;
-    locality?: string;
-    region?: string;
-    country?: string;
+  id: string;
+  display_name: string;
+  formatted_address: string;
+  latitude: number;
+  longitude: number;
+  confidence: number;
+  locality?: string;
+  region?: string;
+  country?: string;
 }
 
 interface AddressAutocompleteProps {
@@ -33,19 +32,18 @@ interface AddressAutocompleteProps {
   debounceMs?: number;
 }
 
-
-export function AddressAutocomplete({ 
-    value, 
-    onChange, 
-    onCoordinatesChange, 
-    placeholder = "Enter address...", 
-    label, 
-    error, 
-    disabled = false, 
-    required = false, 
-    className = "", 
-    autoFocus = false, 
-    debounceMs = 300
+export function AddressAutocomplete({
+  value,
+  onChange,
+  onCoordinatesChange,
+  placeholder = "Enter address...",
+  label,
+  error,
+  disabled = false,
+  required = false,
+  className = "",
+  autoFocus = false,
+  debounceMs = 300,
 }: AddressAutocompleteProps) {
   const [suggestions, setSuggestions] = useState<AddressSuggestion[]>([]);
   const [isOpen, setIsOpen] = useState(false);
@@ -56,7 +54,7 @@ export function AddressAutocomplete({
 
   const inputRef = useRef<HTMLInputElement>(null);
   const dropdownRef = useRef<HTMLDivElement>(null);
-  const debounceRef = useRef<NodeJS.Timeout>(null);
+  const debounceRef = useRef<number | null>(null);
 
   const geocodeMutation = useGeocodeMutation();
 
@@ -72,7 +70,7 @@ export function AddressAutocomplete({
         clearTimeout(debounceRef.current);
       }
 
-      debounceRef.current = setTimeout(async () => {
+      debounceRef.current = window.setTimeout(async () => {
         if (searchTerm.trim().length < 3) {
           setSuggestions([]);
           setIsOpen(false);
@@ -266,99 +264,105 @@ export function AddressAutocomplete({
       return <AlertCircle className="w-4 h-4 text-red-500" />;
     }
     return <MapPin className="w-4 h-4 text-gray-400" />;
-    };
-    
+  };
 
-    return (
-      <div className={`relative ${className}`}>
-        {label && (
-          <label className="block text-sm font-medium text-gray-700 mb-1">
-            {label}
-            {required && <span className="text-red-500 ml-1">*</span>}
-          </label>
-        )}
+  return (
+    <div className={`relative ${className}`}>
+      {label && (
+        <label className="block text-sm font-medium text-gray-700 mb-1">
+          {label}
+          {required && <span className="text-red-500 ml-1">*</span>}
+        </label>
+      )}
 
-        <div className="relative">
-          <input
-            ref={inputRef}
-            type="text"
-            value={value}
-            onChange={handleInputChange}
-            onKeyDown={handleKeyDown}
-            onBlur={handleBlur}
-            placeholder={placeholder}
-            disabled={disabled}
-            autoFocus={autoFocus}
-            className={`
-                w-full px-3 py-3 pl-10 pr-10 border rounded-md
-                bg-[#FAFAFA] focus:ring-2 focus:ring-blue-700 text-gray-900 focus:outline-none
-                disabled:bg-gray-50 disabled:text-gray-500
-                ${error || geocodeError ? "ring-2 ring-red-500" : "border-gray-300"}
-                ${isGeocoded ? "bg-green-50 border-green-300" : ""}
-              `}
-          />
+      <div className="relative">
+        <input
+          ref={inputRef}
+          type="text"
+          value={value}
+          onChange={handleInputChange}
+          onKeyDown={handleKeyDown}
+          onBlur={handleBlur}
+          placeholder={placeholder}
+          disabled={disabled}
+          autoFocus={autoFocus}
+          className={`
+            w-full px-3 py-2 pl-10 pr-10 border rounded-md
+            focus:ring-2 focus:ring-blue-500 focus:border-blue-500
+            disabled:bg-gray-50 disabled:text-gray-500
+            ${error || geocodeError ? "border-red-500" : "border-gray-300"}
+            ${isGeocoded ? "bg-green-50 border-green-300" : ""}
+          `}
+        />
 
-          {/* Status Icon */}
-          <div className="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none">
-            {getStatusIcon()}
-          </div>
-
-          {/* Clear Button */}
-          {value && !disabled && (
-            <button
-              type="button"
-              onClick={handleClear}
-              className="absolute inset-y-0 right-0 pr-3 flex items-center hover:text-gray-700"
-            >
-              <CircleX className="w-4 h-4 md:h-5 md:w-5 text-gray-500 hover:text-gray-800 relative right-[1.3rem] md:right-[2.8rem]" />
-            </button>
-          )}
+        {/* Status Icon */}
+        <div className="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none">
+          {getStatusIcon()}
         </div>
 
-        {/* Suggestions Dropdown */}
-        {isOpen && suggestions.length > 0 && (
-          <div
-            ref={dropdownRef}
-            className="absolute z-50 w-full mt-1 bg-white border border-gray-300 rounded-md shadow-lg max-h-60 overflow-auto"
+        {/* Clear Button */}
+        {value && !disabled && (
+          <button
+            type="button"
+            onClick={handleClear}
+            className="absolute inset-y-0 right-0 pr-3 flex items-center hover:text-gray-700"
           >
-            {suggestions.map((suggestion, index) => (
-              <button
-                key={suggestion.id}
-                type="button"
-                onClick={() => handleSuggestionSelect(suggestion)}
-                className={`
-                    w-full text-left px-4 py-3 hover:bg-gray-50 focus:bg-gray-50 focus:outline-none
-                    border-b border-gray-100 last:border-b-0
-                    ${index === selectedIndex ? "bg-blue-50" : ""}
-                  `}
-              >
-                <div className="flex items-start space-x-3">
-                  <MapPin className="w-4 h-4 text-gray-400 mt-0.5 flex-shrink-0" />
-                  <div className="flex-1 min-w-0">
-                    <p className="text-sm font-medium text-gray-900 truncate">
-                      {suggestion.display_name}
-                    </p>
-                    {suggestion.locality && suggestion.region && (
-                      <p className="text-xs text-gray-500 mt-1">
-                        {suggestion.locality}, {suggestion.region}
-                      </p>
-                    )}
-                    <div className="flex items-center space-x-2 mt-1">
-                      <span className="text-xs text-gray-400">
-                        Confidence: {Math.round(suggestion.confidence * 100)}%
-                      </span>
-                    </div>
-                  </div>
-                </div>
-              </button>
-            ))}
-          </div>
-        )}
-
-        {/* Error Message */}
-        {(error || geocodeError) && (
-          <p className="mt-1 text-sm text-red-600">{error || geocodeError}</p>
+            <X className="w-4 h-4 text-gray-400" />
+          </button>
         )}
       </div>
-    );
+
+      {/* Suggestions Dropdown */}
+      {isOpen && suggestions.length > 0 && (
+        <div
+          ref={dropdownRef}
+          className="absolute z-50 w-full mt-1 bg-white border border-gray-300 rounded-md shadow-lg max-h-60 overflow-auto"
+        >
+          {suggestions.map((suggestion, index) => (
+            <button
+              key={suggestion.id}
+              type="button"
+              onClick={() => handleSuggestionSelect(suggestion)}
+              className={`
+                w-full text-left px-4 py-3 hover:bg-gray-50 focus:bg-gray-50 focus:outline-none
+                border-b border-gray-100 last:border-b-0
+                ${index === selectedIndex ? "bg-blue-50" : ""}
+              `}
+            >
+              <div className="flex items-center gap-3">
+                <MapPin className="w-4 h-4 text-gray-400 flex-shrink-0" />
+                <div className="flex-1 min-w-0">
+                  <div className="text-sm font-medium text-gray-900 truncate">
+                    {suggestion.display_name}
+                  </div>
+                  {suggestion.locality && (
+                    <div className="text-xs text-gray-500 truncate">
+                      {suggestion.locality}
+                      {suggestion.region && `, ${suggestion.region}`}
+                    </div>
+                  )}
+                </div>
+              </div>
+            </button>
+          ))}
+        </div>
+      )}
+
+      {/* Error Message */}
+      {(error || geocodeError) && (
+        <div className="mt-1 text-sm text-red-600 flex items-center gap-1">
+          <AlertCircle className="w-4 h-4" />
+          {error || geocodeError}
+        </div>
+      )}
+
+      {/* Success Message */}
+      {isGeocoded && !error && !geocodeError && (
+        <div className="mt-1 text-sm text-green-600 flex items-center gap-1">
+          <CheckCircle className="w-4 h-4" />
+          Address validated
+        </div>
+      )}
+    </div>
+  );
 }
