@@ -138,10 +138,6 @@ export const TripActions: React.FC<TripActionsProps> = ({
     currentCompletionResult &&
     currentCompletionResult.hours_summary
   ) {
-    console.log(
-      "Showing hours summary for completed trip:",
-      currentCompletionResult
-    );
     return (
       <div
         className={`bg-blue-50 border border-blue-200 py-4 px-2 md:px-4 rounded-lg ${className}`}
