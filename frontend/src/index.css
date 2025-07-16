@@ -34,6 +34,68 @@
   border: 1px solid #e5e7eb !important;
 }
 
+.leaflet-container {
+  z-index: 1 !important;
+}
+
+.leaflet-control-container {
+  z-index: 10 !important;
+}
+
+.leaflet-control {
+  z-index: 10 !important;
+}
+
+.leaflet-top,
+.leaflet-bottom {
+  z-index: 10 !important;
+}
+
+.leaflet-control-zoom {
+  z-index: 10 !important;
+}
+
+.leaflet-control-attribution {
+  z-index: 10 !important;
+}
+
+.leaflet-map-pane {
+  z-index: 1 !important;
+}
+
+.leaflet-tile-pane {
+  z-index: 2 !important;
+}
+
+.leaflet-overlay-pane {
+  z-index: 3 !important;
+}
+
+.leaflet-shadow-pane {
+  z-index: 4 !important;
+}
+
+.leaflet-marker-pane {
+  z-index: 5 !important;
+}
+
+.leaflet-tooltip-pane {
+  z-index: 6 !important;
+}
+
+.leaflet-popup-pane {
+  z-index: 7 !important;
+}
+
+.leaflet-popup {
+  z-index: 25 !important;
+}
+
+.leaflet-popup-content-wrapper {
+  z-index: 25 !important;
+}
+
+
 @layer base {
   html {
     font-family: 'Inter', system-ui, sans-serif;

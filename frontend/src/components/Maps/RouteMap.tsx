@@ -114,7 +114,6 @@ export function RouteMap({
   };
 
   const handleToggleTraffic = () => {
-    // Traffic layer toggle logic would go here
     console.log("Traffic toggle:", !showTraffic);
   };
 
@@ -184,7 +183,7 @@ export function RouteMap({
       />
 
       {/* Map legend */}
-      <div className="absolute bottom-4 left-4 z-[1000]">
+      <div className="absolute bottom-4 left-4 z-[40]">
         <div className="bg-white rounded-lg shadow-lg border border-gray-200 p-3">
           <h4 className="text-sm font-medium text-gray-900 mb-2">Map Legend</h4>
           <div className="space-y-1 text-xs">

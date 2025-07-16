@@ -19,7 +19,7 @@ export const MapControls: React.FC<MapControlsProps> = ({
   isLocating,
 }) => {
   return (
-    <div className="absolute top-4 right-4 z-[1000] flex flex-col space-y-2">
+    <div className="absolute top-4 right-4 z-[40] flex flex-col space-y-2">
       <div className="bg-white rounded-lg shadow-lg border border-gray-200 p-2 flex flex-col space-y-1">
         <Button
           variant="ghost"
