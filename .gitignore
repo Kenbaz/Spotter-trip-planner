@@ -11,7 +11,6 @@ dist/
 downloads/
 eggs/
 .eggs/
-lib/
 lib64/
 parts/
 sdist/
@@ -89,11 +88,6 @@ Thumbs.db
 venv/
 .venv/
 ENV/
-
-# Compiled TypeScript
-frontend/**/*.js
-frontend/**/*.jsx
-frontend/**/*.js.map
 
 # Temp files
 tmp/
