@@ -97,13 +97,10 @@ class AuthService {
     error?: string;
   }> {
     try {
-      console.log("Attempting login for username:", username);
       const response = await apiClient.post<LoginResponse>("/login/", {
         username,
         password,
       });
-
-      console.log("Login response:", response.data);
 
       if (response.data.access && response.data.refresh) {
         this.setTokens(response.data.access, response.data.refresh);
@@ -195,7 +192,6 @@ class AuthService {
     try {
       const refreshToken = this.getRefreshToken();
       if (!refreshToken) {
-        console.log("No refresh token available");
         return false;
       }
 
@@ -214,7 +210,6 @@ class AuthService {
           localStorage.setItem(this.REFRESH_TOKEN_KEY, response.data.refresh);
         }
 
-        console.log("Token refreshed successfully");
         return true;
       }
 
@@ -238,16 +233,13 @@ class AuthService {
   async getCurrentUser(): Promise<User | null> {
     // First check if we have a valid token
     if (!this.isAuthenticated()) {
-      console.log("No valid access token available");
       return null;
     }
 
     // Try to refresh token if it's expiring soon
     if (this.isTokenExpiringSoon()) {
-      console.log("Token expiring soon, attempting refresh");
       const refreshed = await this.refreshToken();
       if (!refreshed) {
-        console.log("Failed to refresh expiring token");
         return null;
       }
     }
@@ -255,21 +247,13 @@ class AuthService {
     // Attempt to get current user with retry logic
     for (let attempt = 1; attempt <= this.MAX_RETRY_ATTEMPTS; attempt++) {
       try {
-        console.log(
-          `Attempting to get current user (attempt ${attempt}/${this.MAX_RETRY_ATTEMPTS})`
-        );
-
         // The backend returns the user data directly, not wrapped in { success, user }
         const response = await apiClient.get<User>("/current_user/");
 
-        console.log("Current user API response:", response.data);
-
         if (response.data && typeof response.data === "object") {
-          console.log("Successfully retrieved current user");
           return response.data;
         }
 
-        console.log("Invalid response format from current_user endpoint");
         return null;
       } catch (error) {
         console.error(`Get current user attempt ${attempt} failed:`, error);
@@ -312,9 +296,9 @@ class AuthService {
         }
 
         // Wait before retrying for temporary errors
-        console.log(
-          `Temporary error detected, waiting ${this.RETRY_DELAY}ms before retry`
-        );
+        // console.log(
+        //   `Temporary error detected, waiting ${this.RETRY_DELAY}ms before retry`
+        // );
         await this.delay(this.RETRY_DELAY * attempt);
       }
     }

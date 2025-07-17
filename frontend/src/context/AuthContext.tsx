@@ -40,14 +40,14 @@ export function AuthProvider({ children }: AuthProviderProps) {
 
     try {
       setIsInitializing(true);
-      console.log("Initializing authentication...");
+      // console.log("Initializing authentication...");
 
       // First check if we have tokens stored
       const hasTokens =
         authService.getAccessToken() && authService.getRefreshToken();
 
       if (!hasTokens) {
-        console.log("No tokens found, user not authenticated");
+        // console.log("No tokens found, user not authenticated");
         setUser(null);
         return;
       }
@@ -56,11 +56,11 @@ export function AuthProvider({ children }: AuthProviderProps) {
       const isTokenValid = authService.isAuthenticated();
 
       if (!isTokenValid) {
-        console.log("Token is expired, attempting refresh");
+        // console.log("Token is expired, attempting refresh");
         const refreshed = await authService.refreshToken();
 
         if (!refreshed) {
-          console.log("Token refresh failed, clearing auth state");
+          // console.log("Token refresh failed, clearing auth state");
           setUser(null);
           return;
         }
@@ -70,20 +70,20 @@ export function AuthProvider({ children }: AuthProviderProps) {
       const currentUser = await authService.getCurrentUser();
 
       if (currentUser) {
-        console.log(
-          "Authentication initialized successfully with user:",
-          currentUser.username
-        );
+        // console.log(
+        //   "Authentication initialized successfully with user:",
+        //   currentUser.username
+        // );
         setUser(currentUser);
       } else {
         console.log("Failed to get current user info");
         if (authService.isAuthenticated()) {
-          console.log(
-            "Valid token exists, but API call failed - this could be temporary"
-          );
+          // console.log(
+          //   "Valid token exists, but API call failed - this could be temporary"
+          // );
           setUser(null);
         } else {
-          console.log("No valid tokens, user not authenticated");
+          // console.log("No valid tokens, user not authenticated");
           setUser(null);
         }
       }
@@ -92,9 +92,9 @@ export function AuthProvider({ children }: AuthProviderProps) {
 
       // Don't clear tokens on network errors, only on definitive auth failures
       if (authService.isAuthenticated()) {
-        console.log("Keeping user authenticated despite initialization error");
+        // console.log("Keeping user authenticated despite initialization error");
       } else {
-        console.log("Clearing auth state due to invalid tokens");
+        // console.log("Clearing auth state due to invalid tokens");
         authService.clearTokens();
         setUser(null);
       }
@@ -124,7 +124,7 @@ export function AuthProvider({ children }: AuthProviderProps) {
         const fiveMinutesFromNow = currentTime + 300;
 
         if (payload.exp < fiveMinutesFromNow) {
-          console.log("Token expiring soon, refreshing...");
+          // console.log("Token expiring soon, refreshing...");
           const success = await refreshToken();
           if (!success) {
             console.log("Periodic token refresh failed");
@@ -179,7 +179,7 @@ export function AuthProvider({ children }: AuthProviderProps) {
       const success = await authService.refreshToken();
 
       if (!success) {
-        console.log("Token refresh failed, logging out");
+        // console.log("Token refresh failed, logging out");
         setUser(null);
         setInitializationAttempted(false);
         return false;

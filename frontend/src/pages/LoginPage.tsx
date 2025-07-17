@@ -28,7 +28,6 @@ export function LoginPage() {
       if (!result.success) {
         setError(result.error || "Login failed");
       }
-      // If login is successful, the auth context will update and redirect automatically
     } catch (err) {
       console.error("Login error:", err);
       setError("An unexpected error occurred");
