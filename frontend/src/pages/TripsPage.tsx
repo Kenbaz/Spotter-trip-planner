@@ -145,7 +145,7 @@ function TripsPage() {
   const statusOptions: DropdownOption[] = [
     { value: "all", label: "All Status" },
     { value: "draft", label: "Draft" },
-    { value: "planned", label: "Planned" },
+    { value: "Planned", label: "Planned" },
     { value: "in_progress", label: "In Progress" },
     { value: "completed", label: "Completed" },
   ];
@@ -206,8 +206,6 @@ function TripsPage() {
       { completed: 0, inProgress: 0, planned: 0, draft: 0, total: 0 }
     );
   }, [trips]);
-
-  console.log('planned trips:', tripStats.planned);
 
   const getStatusBadge = (status: string) => {
     const baseClasses =
