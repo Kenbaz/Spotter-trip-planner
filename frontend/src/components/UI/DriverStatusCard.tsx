@@ -32,7 +32,7 @@ export const DriverStatusCard: React.FC<DriverStatusCardProps> = ({
     data: statusResponse,
     isLoading,
     isError,
-    error,
+    // error,
     refetch,
     isRefetching
   } = useCurrentDriverStatus();
@@ -91,7 +91,7 @@ export const DriverStatusCard: React.FC<DriverStatusCardProps> = ({
             <div className="flex items-center space-x-2">
               <AlertCircle className="w-5 h-5 text-red-600" />
               <span className="text-red-800">
-                Failed to load HOS status: {error?.message || "Unknown error"}
+                Failed to load HOS status
               </span>
             </div>
             <Button
