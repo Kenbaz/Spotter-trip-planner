@@ -88,7 +88,7 @@ function DashboardPage() {
     const inProgress = trips.filter(
       (trip) => trip.status === "in_progress"
     ).length;
-    const planned = trips.filter((trip) => trip.status === "planned").length;
+    const planned = trips.filter((trip) => trip.status === "Planned").length;
 
     // Calculate next break time if needed
     let nextBreakTime = null;
@@ -123,7 +123,7 @@ function DashboardPage() {
       total: trips.length,
       completed: trips.filter((trip) => trip.status === "completed").length,
       inProgress: trips.filter((trip) => trip.status === "in_progress").length,
-      planned: trips.filter((trip) => trip.status === "planned").length,
+      planned: trips.filter((trip) => trip.status === "Planned").length,
       draft: trips.filter((trip) => trip.status === "draft").length,
     };
   }, [trips]);

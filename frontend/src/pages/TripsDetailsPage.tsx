@@ -453,7 +453,7 @@ function TripDetailPage() {
                       onClick={handleCalculateRoute}
                       isLoading={isCalculating}
                       disabled={isCalculating || isOptimizing}
-                      className="bg-green-600 hover:bg-green-700"
+                      className="bg-green-600 hover:bg-green-700 w-[100%] xl:w-[20%]"
                     >
                       {isCalculating ? "Generating..." : "Generate Route"}
                     </Button>
@@ -464,6 +464,7 @@ function TripDetailPage() {
                       onClick={handleDeleteClick}
                       isLoading={deleteTrip.isPending}
                       disabled={deleteTrip.isPending}
+                      className="w-[100%] xl:w-[20%]"
                     >
                       {deleteTrip.isPending ? "Deleting..." : "Delete Trip"}
                     </Button>

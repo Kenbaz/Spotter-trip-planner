@@ -636,6 +636,7 @@ export function CreateTripPage() {
                   type="button"
                   variant="danger"
                   disabled={isFormDisabled}
+                  className="w-[7rem]"
                 >
                   Cancel
                 </Button>
@@ -647,6 +648,7 @@ export function CreateTripPage() {
                 }
                 isLoading={createTripMutation.isPending}
                 leftIcon={<Calculator className="w-4 h-4" />}
+                className="w-[40%] md:w-[30%] lg:w-[20%]"
               >
                 {createTripMutation.isPending
                   ? "Creating Trip..."

@@ -192,7 +192,7 @@ function TripsPage() {
           case "in_progress":
             stats.inProgress++;
             break;
-          case "planned":
+          case "Planned":
             stats.planned++;
             break;
           case "draft":
@@ -206,6 +206,8 @@ function TripsPage() {
       { completed: 0, inProgress: 0, planned: 0, draft: 0, total: 0 }
     );
   }, [trips]);
+
+  console.log('planned trips:', tripStats.planned);
 
   const getStatusBadge = (status: string) => {
     const baseClasses =
